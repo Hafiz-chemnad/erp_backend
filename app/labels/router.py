@@ -35,10 +35,10 @@ async def update_label(
     body: LabelUpdate,
     db=Depends(get_database),
 ):
-    updated = await service.update_label(db, restaurant_id, label_id, body)
-    if updated is None:
-        raise HTTPException(status_code=403, detail="Automated Smart Labels cannot be edited manually, or label not found")
-    return updated
+    result = await service.update_label(db, restaurant_id, label_id, body)
+    if result == "forbidden":
+        raise HTTPException(status_code=403, detail="Automated Smart Labels cannot be edited manually")
+    return result
 
 
 @router.delete("/{label_id}")
@@ -48,8 +48,6 @@ async def delete_label(
     db=Depends(get_database),
 ):
     result = await service.delete_label(db, restaurant_id, label_id)
-    if result is None:
+    if result == "forbidden":
         raise HTTPException(status_code=403, detail="Automated Smart Labels cannot be deleted manually")
-    if result is False:
-        raise HTTPException(status_code=404, detail="Label not found")
     return {"success": True}

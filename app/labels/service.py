@@ -40,33 +40,40 @@ async def create_label(db, restaurant_id: str, label: LabelIn) -> LabelOut:
     return LabelOut(**saved)
 
 
-async def update_label(db, restaurant_id: str, label_id: str, body: LabelUpdate) -> LabelOut | None:
+async def update_label(db, restaurant_id: str, label_id: str, body: LabelUpdate):
+    """Returns 'forbidden' if the label is a real, already-synced automated
+    label. Otherwise upserts — this is what lets labels created before the
+    backend existed (local-only stragglers) get migrated forward on first edit,
+    instead of being falsely rejected as if they were automation-protected."""
     coll = db[COLLECTION]
+    now = datetime.now(timezone.utc)
 
     existing = await coll.find_one({"restaurant_id": restaurant_id, "label_id": label_id})
-    if not existing:
-        return None
-    if existing.get("is_automated"):
-        return None  # router turns this into a 403 — automated labels aren't manually editable
+    if existing and existing.get("is_automated"):
+        return "forbidden"
 
     await coll.update_one(
         {"restaurant_id": restaurant_id, "label_id": label_id},
-        {"$set": {"name": body.name, "description": body.description}},
+        {
+            "$set": {"name": body.name, "description": body.description, "is_automated": False},
+            "$setOnInsert": {"restaurant_id": restaurant_id, "label_id": label_id, "contact_count": 0, "created_at": now},
+        },
+        upsert=True,
     )
     saved = await coll.find_one({"restaurant_id": restaurant_id, "label_id": label_id})
     return LabelOut(**saved)
 
 
-async def delete_label(db, restaurant_id: str, label_id: str) -> bool | None:
-    """Returns None if the label is automated (caller turns that into 403),
-    True/False for a normal delete attempt."""
+async def delete_label(db, restaurant_id: str, label_id: str):
+    """Returns 'forbidden' for a real automated label. Otherwise always
+    succeeds — if the label was never in Mongo (a local-only straggler from
+    before this backend existed), there's simply nothing to delete there,
+    which is not an error the user needs to see."""
     coll = db[COLLECTION]
 
     existing = await coll.find_one({"restaurant_id": restaurant_id, "label_id": label_id})
-    if not existing:
-        return False
-    if existing.get("is_automated"):
-        return None
+    if existing and existing.get("is_automated"):
+        return "forbidden"
 
     await coll.delete_one({"restaurant_id": restaurant_id, "label_id": label_id})
 
@@ -77,7 +84,7 @@ async def delete_label(db, restaurant_id: str, label_id: str) -> bool | None:
         {"restaurant_id": restaurant_id},
         {"$pull": {"label_ids": label_id}},
     )
-    return True
+    return "ok"
 
 
 async def recalculate_label_counts(db, restaurant_id: str) -> None:
