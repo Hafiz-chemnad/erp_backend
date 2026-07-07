@@ -30,6 +30,6 @@ async def ensure_indexes():
     await db.contacts.create_index(
         [("restaurant_id", 1), ("phone", 1)], unique=True
     )
-     await db.campaigns.create_index(                     # 🆕
+     await db.campaigns.create_index(                     
         [("restaurant_id", 1), ("campaign_id", 1)], unique=True
     )
