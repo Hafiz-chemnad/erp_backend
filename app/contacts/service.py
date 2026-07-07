@@ -50,7 +50,11 @@ async def upsert_contact(db, restaurant_id: str, contact: ContactIn, source: str
     """
     coll = db[COLLECTION]
     now = datetime.now(timezone.utc)
-    phone = contact.phone.strip()
+    # Sanitize to digits-only here too — bulk_import_contacts already does
+    # this, but single-add was trusting the client to have stripped
+    # formatting first. Without this, "+91 98765" and "919876500000" could
+    # end up as two different documents instead of merging into one.
+    phone = "".join(ch for ch in contact.phone if ch.isdigit())
     incoming_name = contact.name.strip() or phone
 
     existing = await coll.find_one({"restaurant_id": restaurant_id, "phone": phone})

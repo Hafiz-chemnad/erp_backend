@@ -3,6 +3,7 @@ from app.db import ensure_indexes
 from app.menu.router import router as menu_router
 from app.delivery_boys.router import router as delivery_boys_router
 from app.labels.router import router as labels_router
+from app.contacts.router import router as contacts_router
 
 app = FastAPI(title="WhatsApp ERP - CRM Backend")
 
@@ -21,5 +22,5 @@ async def health():
 app.include_router(menu_router)
 app.include_router(delivery_boys_router)
 app.include_router(labels_router)
-# app.include_router(contacts_router)
+app.include_router(contacts_router)
 # app.include_router(campaigns_router)

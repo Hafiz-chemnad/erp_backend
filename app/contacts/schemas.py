@@ -30,7 +30,14 @@ class ContactLabelsUpdate(BaseModel):
 
 
 class ContactOut(BaseModel):
-    """Matches what contacts_tab.dart expects: phone/name/status/labels(+ids)"""
+    """Matches what contacts_tab.dart expects: phone/name/status/labels(+ids).
+
+    NOTE: 'date' uses alias="created_at" — FastAPI serializes response
+    models BY ALIAS by default, so the actual JSON key sent to Flutter is
+    "created_at", not "date". This is the exact bug class that broke
+    Labels (id vs label_id). Nothing reads this field yet, so it's fixed
+    here before anyone gets bitten by it — always read the alias key
+    ("created_at") on the Dart side, never "date"."""
     phone: str
     name: str
     status: str

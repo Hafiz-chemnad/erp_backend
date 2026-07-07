@@ -27,3 +27,6 @@ async def ensure_indexes():
     await db.labels.create_index(
         [("restaurant_id", 1), ("label_id", 1)], unique=True
     )
+    await db.contacts.create_index(
+        [("restaurant_id", 1), ("phone", 1)], unique=True
+    )
