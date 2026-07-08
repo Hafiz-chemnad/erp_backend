@@ -32,7 +32,8 @@ async def create_template_in_meta(waba_id: str, access_token: str, name: str, ca
         return None
 
 async def fetch_templates_from_meta(waba_id: str, access_token: str) -> list[dict]:
-    url = f"{GRAPH_BASE}/{waba_id}/message_templates?fields=name,status,category,language,components,rejected_reason&limit=200"
+    # 🚀 FIX: Added 'id,' right after fields=
+    url = f"{GRAPH_BASE}/{waba_id}/message_templates?fields=id,name,status,category,language,components,rejected_reason&limit=200"
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(url, headers={"Authorization": f"Bearer {access_token}"})
@@ -41,7 +42,6 @@ async def fetch_templates_from_meta(waba_id: str, access_token: str) -> list[dic
             return []
     except Exception:
         return []
-
 async def delete_template_in_meta(waba_id: str, access_token: str, name: str) -> bool:
     url = f"{GRAPH_BASE}/{waba_id}/message_templates?name={name}"
     try:

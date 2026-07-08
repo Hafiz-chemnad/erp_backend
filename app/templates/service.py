@@ -63,6 +63,8 @@ async def create_template(db, restaurant_id: str, body: TemplateCreateIn) -> Tem
 
 async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access_token: str) -> TemplateListResponse:
     """Fetches latest statuses from Meta and syncs them to Mongo."""
+    from app.templates import meta_client
+    
     meta_templates = await meta_client.fetch_templates_from_meta(waba_id, access_token)
     coll = db[COLLECTION]
     
@@ -70,6 +72,7 @@ async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access
         body_text, var_count = _extract_body_text_and_vars(tmpl.get("components", []))
         
         update_doc = {
+            "template_id": tmpl.get("id", ""), # 🚀 FIX: Save the Meta ID
             "status": tmpl.get("status", "PENDING"),
             "rejected_reason": tmpl.get("rejected_reason"),
             "category": tmpl.get("category"),
@@ -79,9 +82,16 @@ async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access
             "updated_at": datetime.now(timezone.utc)
         }
         
+        # 🚀 FIX: Use $setOnInsert to provide defaults for brand new templates
         await coll.update_one(
             {"restaurant_id": restaurant_id, "name": tmpl.get("name")},
-            {"$set": update_doc},
+            {
+                "$set": update_doc,
+                "$setOnInsert": {
+                    "default_mappings": {},
+                    "created_at": datetime.now(timezone.utc)
+                }
+            },
             upsert=True
         )
         
