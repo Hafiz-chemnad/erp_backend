@@ -140,17 +140,28 @@ async def sync_menu_from_meta(db, restaurant_id: str, catalog_id: str, access_to
         except ValueError:
             price = 0.0
 
+        # 🚀 FIX: only use Meta's image_url to SEED an item that has no
+        # image yet. Meta's returned image_url on catalog reads can be a
+        # temporary CDN mirror that expires — overwriting an already-set
+        # image on every sync silently breaks good images over time.
+        existing = await coll.find_one(
+            {"restaurant_id": restaurant_id, "retailer_id": retailer_id},
+            {"image_url": 1},
+        )
+        existing_image_url = existing.get("image_url") if existing else None
+
         doc = {
             "restaurant_id": restaurant_id,
             "retailer_id": retailer_id,
             "name": meta_item.get("name") or "Unnamed Item",
             "price": price,
             "category": meta_item.get("description") or "Menu Item",
-            "image_url": meta_item.get("image_url") or "",
             "is_available": meta_item.get("availability") == "in stock",
             "is_veg": False,
             "updated_at": now,
         }
+        if not existing_image_url:
+            doc["image_url"] = meta_item.get("image_url") or ""
 
         await coll.update_one(
             {"restaurant_id": restaurant_id, "retailer_id": retailer_id},
