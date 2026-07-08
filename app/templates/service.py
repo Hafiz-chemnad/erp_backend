@@ -81,7 +81,7 @@ async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access
         
         await coll.update_one(
             {"restaurant_id": restaurant_id, "name": tmpl.get("name")},
-            {"$set": update_doc}
+            {"$set": update_doc},
             upsert=True
         )
         
