@@ -5,6 +5,7 @@ from app.delivery_boys.router import router as delivery_boys_router
 from app.labels.router import router as labels_router
 from app.contacts.router import router as contacts_router
 from app.campaigns.router import router as campaigns_router 
+from app.templates.router import router as templates_router
 
 app = FastAPI(title="WhatsApp ERP - CRM Backend")
 
@@ -24,5 +25,6 @@ app.include_router(menu_router)
 app.include_router(delivery_boys_router)
 app.include_router(labels_router)
 app.include_router(contacts_router)
-app.include_router(campaigns_router)                                  # 🆕
+app.include_router(campaigns_router)                                  
+app.include_router(templates_router)
 
