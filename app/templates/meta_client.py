@@ -5,6 +5,84 @@ GRAPH_BASE = "https://graph.facebook.com/v19.0"
 
 # app/templates/meta_client.py
 
+import httpx
+import re
+
+GRAPH_BASE = "https://graph.facebook.com/v19.0"
+
+# 🚀 NEW HELPER: Silently uploads a dummy file to Meta's Resumable API to get the required handle
+async def get_dummy_media_handle(access_token: str, header_type: str) -> str | None:
+    dummy_files = {
+        "IMAGE": {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+            "type": "image/png"
+        },
+        "VIDEO": {
+            "url": "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
+            "type": "video/mp4"
+        },
+        "DOCUMENT": {
+            "url": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf",
+            "type": "application/pdf"
+        }
+    }
+    
+    if header_type not in dummy_files:
+        return None
+        
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 1. Download dummy file bytes
+            media_resp = await client.get(dummy_files[header_type]["url"])
+            if media_resp.status_code != 200:
+                print("❌ Failed to download dummy media.")
+                return None
+            
+            file_bytes = media_resp.content
+            
+            # 2. Create Upload Session
+            session_url = f"{GRAPH_BASE}/app/uploads"
+            session_params = {
+                "file_length": str(len(file_bytes)),
+                "file_type": dummy_files[header_type]["type"]
+            }
+            session_resp = await client.post(
+                session_url, 
+                params=session_params, 
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            
+            if session_resp.status_code != 200:
+                print(f"❌ Meta Session Error: {session_resp.text}")
+                return None
+                
+            session_id = session_resp.json().get("id")
+            
+            # 3. Upload File Bytes using the Session ID
+            upload_url = f"{GRAPH_BASE}/{session_id}"
+            upload_headers = {
+                "Authorization": f"OAuth {access_token}",
+                "file_offset": "0"
+            }
+            upload_resp = await client.post(
+                upload_url, 
+                headers=upload_headers, 
+                content=file_bytes
+            )
+            
+            if upload_resp.status_code != 200:
+                print(f"❌ Meta Upload Error: {upload_resp.text}")
+                return None
+                
+            # Return the required cryptographic handle!
+            return upload_resp.json().get("h")
+            
+    except Exception as e:
+        print(f"❌ Dummy Media Handle Error: {str(e)}")
+        return None
+
+
+# 🚀 UPDATED CREATE FUNCTION
 async def create_template_in_meta(
     waba_id: str, 
     access_token: str, 
@@ -24,18 +102,20 @@ async def create_template_in_meta(
     if var_count > 0:
         components[0]["example"] = {"body_text": [["Sample"] * var_count]}
 
-    # 🚀 FIXED HEADER LOGIC: Used 'header_url' and strictly typed file extensions
+    # 🚀 FIXED HEADER LOGIC: Use the Resumable Upload Helper!
     if header_type in ["IMAGE", "VIDEO", "DOCUMENT"]:
-        dummy_urls = {
-            "IMAGE": "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
-            "VIDEO": "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
-            "DOCUMENT": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
-        }
-        components.append({
-            "type": "HEADER",
-            "format": header_type,
-            "example": {"header_url": [dummy_urls[header_type]]} # 🚀 Changed from header_handle
-        })
+        print(f"⏳ Generating secure dummy media handle for {header_type}...")
+        handle = await get_dummy_media_handle(access_token, header_type)
+        
+        if handle:
+            components.append({
+                "type": "HEADER",
+                "format": header_type,
+                "example": {"header_handle": [handle]} # 🚀 Successfully passing the ID!
+            })
+        else:
+            print("⚠️ Could not generate media handle. Meta will likely reject this request.")
+            
     elif header_type == "TEXT" and header_text:
         components.append({
             "type": "HEADER",
@@ -51,7 +131,8 @@ async def create_template_in_meta(
     }
     
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        # Increased timeout to 45 seconds because we are doing multiple network requests now!
+        async with httpx.AsyncClient(timeout=45.0) as client: 
             response = await client.post(url, headers={"Authorization": f"Bearer {access_token}"}, json=payload)
             if response.status_code not in [200, 201]:
                 print(f"❌ META REJECTED CREATE: {response.text}")
@@ -61,26 +142,6 @@ async def create_template_in_meta(
         print(f"❌ CREATE CRASHED: {str(e)}")
         return None
         
-async def fetch_templates_from_meta(waba_id: str, access_token: str) -> list[dict]:
-    url = f"{GRAPH_BASE}/{waba_id}/message_templates?fields=id,name,status,category,language,components,rejected_reason&limit=200"
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(url, headers={"Authorization": f"Bearer {access_token}"})
-            if response.status_code == 200:
-                return response.json().get("data", [])
-            return []
-    except Exception:
-        return []
-
-async def delete_template_in_meta(waba_id: str, access_token: str, name: str) -> bool:
-    url = f"{GRAPH_BASE}/{waba_id}/message_templates?name={name}"
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.delete(url, headers={"Authorization": f"Bearer {access_token}"})
-            return response.status_code == 200
-    except Exception:
-        return False
-
 async def send_template_message(
     phone_number_id: str, # Note: Meta uses phone_number_id for sending, not waba_id!
     access_token: str, 
