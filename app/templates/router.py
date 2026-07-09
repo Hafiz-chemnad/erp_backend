@@ -3,6 +3,7 @@ from app.db import get_database
 from app.templates.schemas import TemplateCreateIn, RefreshStatusIn, TemplateOut, TemplateListResponse, SendMessageRequest
 from app.templates import service
 from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
+import mimetypes # 🚀 ADD THIS
 router = APIRouter(prefix="/api/{restaurant_id}/templates", tags=["templates"])
 
 @router.get("", response_model=TemplateListResponse)
@@ -56,12 +57,18 @@ async def upload_media(
     from app.templates import meta_client
     
     file_bytes = await file.read()
+    
+    # 🚀 THE FIX: Automatically detect the correct MIME type (video/mp4, image/png, etc.) 
+    # from the filename extension, overriding Flutter's default 'octet-stream'.
+    guessed_mime, _ = mimetypes.guess_type(file.filename)
+    final_mime = guessed_mime or file.content_type or "application/octet-stream"
+    
     media_id = await meta_client.upload_media_to_meta(
         phone_number_id=phone_number_id,
         access_token=access_token,
         file_bytes=file_bytes,
         file_name=file.filename,
-        mime_type=file.content_type
+        mime_type=final_mime  # 🚀 Pass the corrected MIME type here!
     )
     
     if not media_id:
