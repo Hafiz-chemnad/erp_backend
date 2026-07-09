@@ -12,8 +12,8 @@ async def create_template_in_meta(
     category: str, 
     language: str, 
     body_text: str,
-    header_type: str = "NONE",   # 🚀 ADDED
-    header_text: str | None = None  # 🚀 ADDED
+    header_type: str = "NONE",
+    header_text: str | None = None
 ) -> dict | None:
     url = f"{GRAPH_BASE}/{waba_id}/message_templates"
     
@@ -24,17 +24,17 @@ async def create_template_in_meta(
     if var_count > 0:
         components[0]["example"] = {"body_text": [["Sample"] * var_count]}
 
-    # 🚀 NEW HEADER LOGIC: Build and append the header component block
+    # 🚀 FIXED HEADER LOGIC: Used 'header_url' and strictly typed file extensions
     if header_type in ["IMAGE", "VIDEO", "DOCUMENT"]:
         dummy_urls = {
-            "IMAGE": "https://dummyimage.com/600x400/png/text=Sample",
+            "IMAGE": "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
             "VIDEO": "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
             "DOCUMENT": "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
         }
         components.append({
             "type": "HEADER",
             "format": header_type,
-            "example": {"header_handle": [dummy_urls[header_type]]}
+            "example": {"header_url": [dummy_urls[header_type]]} # 🚀 Changed from header_handle
         })
     elif header_type == "TEXT" and header_text:
         components.append({
@@ -60,7 +60,7 @@ async def create_template_in_meta(
     except Exception as e:
         print(f"❌ CREATE CRASHED: {str(e)}")
         return None
-
+        
 async def fetch_templates_from_meta(waba_id: str, access_token: str) -> list[dict]:
     url = f"{GRAPH_BASE}/{waba_id}/message_templates?fields=id,name,status,category,language,components,rejected_reason&limit=200"
     try:
