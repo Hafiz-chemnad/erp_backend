@@ -5,10 +5,12 @@ GRAPH_BASE = "https://graph.facebook.com/v19.0"
 
 # app/templates/meta_client.py
 
+# 🚀 NEW HELPER: Silently uploads a dummy file to Meta's Resumable API to get the required handle
 async def get_dummy_media_handle(access_token: str, header_type: str) -> str | None:
     dummy_files = {
         "IMAGE": {
-            "url": "https://upload.wikimedia.org/wikipedia/commons/4/47/PNG_transparency_demonstration_1.png",
+            # 🚀 Swapped to a highly reliable GitHub-hosted dummy image just to be safe
+            "url": "https://raw.githubusercontent.com/github/explore/80688e429a7d4ef2fca1e82350fe8e3517d3494d/topics/python/python.png",
             "type": "image/png"
         },
         "VIDEO": {
@@ -26,10 +28,15 @@ async def get_dummy_media_handle(access_token: str, header_type: str) -> str | N
         
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # 1. Download dummy file bytes
-            media_resp = await client.get(dummy_files[header_type]["url"])
+            # 🚀 FIX: Added a Google Chrome User-Agent disguise so servers don't block the download!
+            browser_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            
+            # 1. Download dummy file bytes using the disguise
+            media_resp = await client.get(dummy_files[header_type]["url"], headers=browser_headers)
             if media_resp.status_code != 200:
-                print("❌ Failed to download dummy media.")
+                print(f"❌ Failed to download dummy media. Server returned Status: {media_resp.status_code}")
                 return None
             
             file_bytes = media_resp.content
@@ -74,7 +81,6 @@ async def get_dummy_media_handle(access_token: str, header_type: str) -> str | N
     except Exception as e:
         print(f"❌ Dummy Media Handle Error: {str(e)}")
         return None
-
 
 # 🚀 UPDATED CREATE FUNCTION
 async def create_template_in_meta(
@@ -135,7 +141,7 @@ async def create_template_in_meta(
     except Exception as e:
         print(f"❌ CREATE CRASHED: {str(e)}")
         return None
-        
+
 async def fetch_templates_from_meta(waba_id: str, access_token: str) -> list[dict]:
     url = f"{GRAPH_BASE}/{waba_id}/message_templates?fields=id,name,status,category,language,components,rejected_reason&limit=200"
     try:
