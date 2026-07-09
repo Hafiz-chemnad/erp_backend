@@ -7,13 +7,22 @@ from app.templates.schemas import TemplateCreateIn, TemplateOut, TemplateListRes
 logger = logging.getLogger(__name__)
 COLLECTION = "templates"
 
-def _extract_body_text_and_vars(components: list) -> tuple[str, int]:
+def _extract_template_data(components: list) -> tuple[str, int, str, str | None]:
+    body_text = ""
+    var_count = 0
+    header_type = "NONE"
+    header_text = None
+    
     for comp in components:
         if comp.get("type") == "BODY":
-            text = comp.get("text", "")
-            var_count = len(re.findall(r'\{\{\d+\}\}', text))
-            return text, var_count
-    return "", 0
+            body_text = comp.get("text", "")
+            var_count = len(re.findall(r'\{\{\d+\}\}', body_text))
+        elif comp.get("type") == "HEADER":
+            header_type = comp.get("format", "NONE")
+            if header_type == "TEXT":
+                header_text = comp.get("text")
+                
+    return body_text, var_count, header_type, header_text
 
 async def list_templates(db, restaurant_id: str) -> TemplateListResponse:
     coll = db[COLLECTION]
@@ -22,14 +31,19 @@ async def list_templates(db, restaurant_id: str) -> TemplateListResponse:
     items = [TemplateOut(**doc) for doc in docs]
     return TemplateListResponse(items=items)
 
+# app/templates/service.py
+
 async def create_template(db, restaurant_id: str, body: TemplateCreateIn) -> TemplateOut | str:
+    # 🚀 Update method call to handle new arguments
     meta_response = await meta_client.create_template_in_meta(
         waba_id=body.waba_id,
         access_token=body.access_token,
         name=body.name,
         category=body.category,
         language=body.language,
-        body_text=body.body_text
+        body_text=body.body_text,
+        header_type=body.header_type,   # 🚀 ADDED
+        header_text=body.header_text    # 🚀 ADDED
     )
     
     if not meta_response:
@@ -48,10 +62,13 @@ async def create_template(db, restaurant_id: str, body: TemplateCreateIn) -> Tem
         "language": body.language,
         "body_text": body.body_text,
         "variable_count": var_count,
-        "status": "PENDING", # Always starts pending
+        "status": "PENDING",
         "rejected_reason": None,
         "default_mappings": {},
         "created_at": now,
+        # 🚀 ADD TO MONGO SYSTEM TRACKING
+        "header_type": body.header_type,
+        "header_text": body.header_text
     }
     
     await coll.update_one(
@@ -69,16 +86,19 @@ async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access
     coll = db[COLLECTION]
     
     for tmpl in meta_templates:
-        body_text, var_count = _extract_body_text_and_vars(tmpl.get("components", []))
+        # 🚀 Use the new extractor
+        body_text, var_count, header_type, header_text = _extract_template_data(tmpl.get("components", []))
         
         update_doc = {
-            "template_id": tmpl.get("id", ""), # 🚀 FIX: Save the Meta ID
+            "template_id": tmpl.get("id", ""),
             "status": tmpl.get("status", "PENDING"),
             "rejected_reason": tmpl.get("rejected_reason"),
             "category": tmpl.get("category"),
             "language": tmpl.get("language"),
             "body_text": body_text,
             "variable_count": var_count,
+            "header_type": header_type, # 🚀 ADDED
+            "header_text": header_text, # 🚀 ADDED
             "updated_at": datetime.now(timezone.utc)
         }
         

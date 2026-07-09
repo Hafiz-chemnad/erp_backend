@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.db import get_database
-from app.templates.schemas import TemplateCreateIn, RefreshStatusIn, TemplateOut, TemplateListResponse
+from app.templates.schemas import TemplateCreateIn, RefreshStatusIn, TemplateOut, TemplateListResponse, SendMessageRequest
 from app.templates import service
 
 router = APIRouter(prefix="/api/{restaurant_id}/templates", tags=["templates"])
@@ -43,3 +43,28 @@ async def delete_template(
     if result == "error":
         raise HTTPException(status_code=400, detail="Failed to delete from Meta.")
     return {"success": True}
+
+
+
+@router.post("/send-message")
+async def send_direct_message(
+    restaurant_id: str,
+    body: SendMessageRequest,
+):
+    from app.templates import meta_client # Adjust import if needed
+    
+    success = await meta_client.send_template_message(
+        phone_number_id=body.phone_number_id,
+        access_token=body.access_token,
+        to_phone=body.to_phone,
+        template_name=body.template_name,
+        language_code=body.language_code,
+        body_params=body.body_params,
+        header_type=body.header_type,
+        media_url=body.media_url
+    )
+    
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to send message via Meta.")
+    
+    return {"success": True, "message": "Sent successfully"}        
