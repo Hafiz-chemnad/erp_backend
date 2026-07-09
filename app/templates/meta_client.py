@@ -162,20 +162,21 @@ async def delete_template_in_meta(waba_id: str, access_token: str, name: str) ->
     except Exception:
         return False
 
+# 🚀 UPDATED: Now supports sending with a Media ID instead of a URL
 async def send_template_message(
-    phone_number_id: str, # Note: Meta uses phone_number_id for sending, not waba_id!
+    phone_number_id: str,
     access_token: str, 
     to_phone: str, 
     template_name: str, 
     language_code: str, 
     body_params: list[str], 
     header_type: str = "NONE", 
-    media_url: str = None
+    media_url: str = None,
+    media_id: str = None # 🚀 ADDED THIS
 ) -> bool:
     
     url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
     
-    # 1. Base Meta Sending Payload
     payload = {
         "messaging_product": "whatsapp",
         "to": to_phone,
@@ -187,20 +188,22 @@ async def send_template_message(
         }
     }
     
-    # 2. Inject Header Component (If media exists)
-    if header_type in ["IMAGE", "VIDEO", "DOCUMENT"] and media_url:
+    if header_type in ["IMAGE", "VIDEO", "DOCUMENT"]:
         param_type = header_type.lower()
-        payload["template"]["components"].append({
-            "type": "header",
-            "parameters": [
-                {
-                    "type": param_type,
-                    param_type: {"link": media_url}
-                }
-            ]
-        })
+        header_param = {"type": param_type}
         
-    # 3. Inject Body Components (Your {{1}}, {{2}} variables)
+        # Prefer the direct ID if we have it, otherwise fallback to URL
+        if media_id:
+            header_param[param_type] = {"id": media_id}
+        elif media_url:
+            header_param[param_type] = {"link": media_url}
+            
+        if media_id or media_url:
+            payload["template"]["components"].append({
+                "type": "header",
+                "parameters": [header_param]
+            })
+        
     if body_params:
         body_parameters = [{"type": "text", "text": str(param)} for param in body_params]
         payload["template"]["components"].append({
@@ -208,7 +211,6 @@ async def send_template_message(
             "parameters": body_parameters
         })
         
-    # 4. Fire to Meta
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(url, headers={"Authorization": f"Bearer {access_token}"}, json=payload)
@@ -219,4 +221,29 @@ async def send_template_message(
                 return False
     except Exception as e:
         print(f"❌ SEND CRASHED: {str(e)}")
-        return False        
+        return False
+        
+# 🚀 NEW: Securely upload a real file to Meta for sending campaigns
+async def upload_media_to_meta(phone_number_id: str, access_token: str, file_bytes: bytes, file_name: str, mime_type: str) -> str | None:
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/media"
+    
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            data = {"messaging_product": "whatsapp"}
+            files = {"file": (file_name, file_bytes, mime_type)}
+            
+            response = await client.post(
+                url, 
+                headers={"Authorization": f"Bearer {access_token}"},
+                data=data,
+                files=files
+            )
+            
+            if response.status_code == 200:
+                return response.json().get("id") # Returns the secure Meta Media ID!
+            else:
+                print(f"❌ Media Upload Failed: {response.text}")
+                return None
+    except Exception as e:
+        print(f"❌ Media Upload Crashed: {str(e)}")
+        return None        

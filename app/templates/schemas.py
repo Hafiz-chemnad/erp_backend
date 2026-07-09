@@ -45,4 +45,5 @@ class SendMessageRequest(BaseModel):
     language_code: str = "en_US"
     body_params: list[str] = []
     header_type: str = "NONE"
-    media_url: str | None = None    
+    media_url: str | None = None
+    media_id: str | None = None # 🚀 ADDED THIS    
