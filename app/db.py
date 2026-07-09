@@ -36,3 +36,4 @@ async def ensure_indexes():
     await db.templates.create_index(
         [("restaurant_id", 1), ("name", 1)], unique=True
     )
+    await db.message_events.create_index([("wamid", 1)], unique=True)
