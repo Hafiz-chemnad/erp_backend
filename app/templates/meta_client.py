@@ -5,12 +5,6 @@ GRAPH_BASE = "https://graph.facebook.com/v19.0"
 
 # app/templates/meta_client.py
 
-import httpx
-import re
-
-GRAPH_BASE = "https://graph.facebook.com/v19.0"
-
-# 🚀 NEW HELPER: Silently uploads a dummy file to Meta's Resumable API to get the required handle
 async def get_dummy_media_handle(access_token: str, header_type: str) -> str | None:
     dummy_files = {
         "IMAGE": {
@@ -142,6 +136,26 @@ async def create_template_in_meta(
         print(f"❌ CREATE CRASHED: {str(e)}")
         return None
         
+async def fetch_templates_from_meta(waba_id: str, access_token: str) -> list[dict]:
+    url = f"{GRAPH_BASE}/{waba_id}/message_templates?fields=id,name,status,category,language,components,rejected_reason&limit=200"
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(url, headers={"Authorization": f"Bearer {access_token}"})
+            if response.status_code == 200:
+                return response.json().get("data", [])
+            return []
+    except Exception:
+        return []
+
+async def delete_template_in_meta(waba_id: str, access_token: str, name: str) -> bool:
+    url = f"{GRAPH_BASE}/{waba_id}/message_templates?name={name}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.delete(url, headers={"Authorization": f"Bearer {access_token}"})
+            return response.status_code == 200
+    except Exception:
+        return False
+
 async def send_template_message(
     phone_number_id: str, # Note: Meta uses phone_number_id for sending, not waba_id!
     access_token: str, 
