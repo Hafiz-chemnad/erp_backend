@@ -210,7 +210,8 @@ async def send_template_message(
             "type": "body",
             "parameters": body_parameters
         })
-        
+    # 🚀 ADD THIS EXACT LINE:
+    print(f"\n🚀 META PAYLOAD: {payload}\n")    
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(url, headers={"Authorization": f"Bearer {access_token}"}, json=payload)
