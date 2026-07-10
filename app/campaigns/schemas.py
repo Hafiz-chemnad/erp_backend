@@ -49,8 +49,8 @@ class CampaignOut(BaseModel):
     label_id: Optional[str] = None
     recipients_count: int
     sent_count: int
-    delivered_count: int
-    read_count: int
+    delivered_count: int=0
+    read_count: int=0
     failed_count: int
     status: Literal["sending", "completed", "partial", "failed", "cancelled"]
     recipients: List[RecipientOut] = Field(default_factory=list)
@@ -73,8 +73,8 @@ class CampaignListItemOut(BaseModel):
     label_id: Optional[str] = None
     recipients_count: int
     sent_count: int
-    delivered_count: int
-    read_count: int
+    delivered_count: int=0
+    read_count: int=0
     failed_count: int
     status: str
     created_at: Optional[datetime] = None
