@@ -27,8 +27,9 @@ async def verify_webhook(
 @router.post("")
 async def receive_webhook(request: Request):
     body = await request.json()
+    print(f"\n🔥 RAW META WEBHOOK: {body}\n", flush=True) 
+    
     db = get_database()
-
     try:
         entries = body.get("entry", [])
         for entry in entries:
@@ -42,43 +43,49 @@ async def receive_webhook(request: Request):
                     doc = {
                         "wamid": status.get("id"),
                         "recipient_id": status.get("recipient_id"),
-                        "status": status.get("status"),  # sent/delivered/read/failed
+                        "status": status.get("status"),
                         "timestamp": status.get("timestamp"),
-                        "errors": status.get("errors"),  # <-- the actual failure reason lives here
+                        "errors": status.get("errors"),
                         "raw": status,
                     }
-                    logger.info(f"📬 WA STATUS: {doc}")
+                    print(f"\n📬 WA STATUS: {doc}\n", flush=True)
+                    
+                    # 1. Save to your message events database
                     await db.message_events.update_one(
                         {"wamid": doc["wamid"]},
                         {"$push": {"history": doc}, "$set": {"latest_status": doc["status"]}},
                         upsert=True,
                     )
+
+                    # 2. 🚀 THE FIX: OVERWRITE THE "FAKE DATA" IN THE CAMPAIGNS DATABASE!
                     if doc["status"] in ["delivered", "read"]:
                         await db.campaigns.update_one(
-                            {"recipients.wamid": doc["wamid"]},
+                            {"recipients": {"$elemMatch": {"wamid": doc["wamid"], "status": {"$ne": doc["status"]}}}},
                             {
                                 "$set": {"recipients.$.status": doc["status"]},
                                 "$inc": {f"{doc['status']}_count": 1}
                             }
                         )
                     elif doc["status"] == "failed":
-                        # Catch failures that happen asynchronously after sending
+                        # Grab the exact error message from Meta
                         error_text = doc["errors"][0].get("title", "Meta Rejected") if doc.get("errors") else "Failed"
+                        
                         await db.campaigns.update_one(
-                            {"recipients.wamid": doc["wamid"], "recipients.status": {"$ne": "failed"}},
+                            {"recipients": {"$elemMatch": {"wamid": doc["wamid"], "status": {"$ne": "failed"}}}},
                             {
+                                # Change status to failed and save the error text
                                 "$set": {"recipients.$.status": "failed", "recipients.$.error": error_text},
-                                "$inc": {"failed_count": 1}
+                                # 🚀 Fix the math! Subtract 1 from Sent, Add 1 to Failed
+                                "$inc": {"failed_count": 1, "sent_count": -1} 
                             }
                         )
 
-                # --- Incoming user messages (optional, but useful) ---
+                # --- Incoming user messages ---
                 messages = value.get("messages", [])
                 for msg in messages:
-                    logger.info(f"📩 INCOMING MSG: {msg}")
+                    print(f"\n📩 INCOMING MSG: {msg}\n", flush=True)
 
     except Exception as e:
-        logger.error(f"❌ Webhook processing error: {e}")
+        print(f"❌ Webhook error: {e}", flush=True)
 
-    # Always return 200 fast — Meta disables webhooks that time out or error repeatedly
     return {"status": "received"}
