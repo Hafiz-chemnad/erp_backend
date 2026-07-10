@@ -142,3 +142,17 @@ async def get_campaign(db, restaurant_id: str, campaign_id: str):
     if doc is None:
         return "not_found"
     return CampaignOut(**doc)
+
+async def resume_campaign(db, restaurant_id: str, campaign_id: str):
+    """Flips a cancelled campaign back to sending status."""
+    coll = db[COLLECTION]
+    existing = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
+    if existing is None: return "not_found"
+    if existing.get("status") not in ["cancelled", "partial"]: return "invalid_state"
+
+    await coll.update_one(
+        {"restaurant_id": restaurant_id, "campaign_id": campaign_id},
+        {"$set": {"status": "sending"}},
+    )
+    updated = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
+    return CampaignOut(**updated)    

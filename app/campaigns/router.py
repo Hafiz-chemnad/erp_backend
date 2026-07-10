@@ -85,3 +85,17 @@ async def delete_campaign(
     if result == "forbidden":
         raise HTTPException(status_code=403, detail="Cannot delete a campaign that is still sending — cancel it first")
     return {"success": True}
+
+@router.patch("/{campaign_id}/resume", response_model=CampaignOut)
+async def resume_campaign(
+    restaurant_id: str,
+    campaign_id: str,
+    db=Depends(get_database),
+):
+    from app.campaigns import service
+    result = await service.resume_campaign(db, restaurant_id, campaign_id)
+    if result == "not_found":
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    if result == "invalid_state":
+        raise HTTPException(status_code=400, detail="Can only resume paused/cancelled campaigns")
+    return result    
