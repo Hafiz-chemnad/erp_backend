@@ -23,7 +23,7 @@ class CampaignProgressIn(BaseModel):
     """Sent once per recipient, right after that single WhatsApp send
     attempt completes (success or failure)."""
     phone: str
-    outcome: Literal["sent", "failed"]
+    outcome: Literal["pending","sent", "failed"]
     error: Optional[str] = None
     wamid: Optional[str] = None
 

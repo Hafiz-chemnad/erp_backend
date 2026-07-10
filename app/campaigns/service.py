@@ -44,50 +44,35 @@ async def start_campaign(db, restaurant_id: str, body: CampaignStartIn) -> Campa
 
 
 async def report_progress(db, restaurant_id: str, campaign_id: str, body: CampaignProgressIn):
-    """Called once per recipient, right after that individual send
-    attempt finishes. Does an ATOMIC increment + targeted array update —
-    no read-then-write, so concurrent/rapid calls from the same send loop
-    can't race each other and undercount.
-
-    Also auto-derives final status once every recipient has been
-    accounted for, so the client never needs a separate 'mark complete'
-    call — the loop just keeps calling this per-recipient and the last
-    call naturally finalizes the record."""
     coll = db[COLLECTION]
-
     existing = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
-    if existing is None:
-        return "not_found"
-    if existing.get("status") == "cancelled":
-        # A cancelled campaign shouldn't have its counts bumped by
-        # in-flight sends that were already queued client-side before
-        # the cancel flag was noticed.
-        return "cancelled"
+    if existing is None: return "not_found"
+    if existing.get("status") == "cancelled": return "cancelled"
 
-    inc_field = "sent_count" if body.outcome == "sent" else "failed_count"
+    # 🚀 FIX 1: Only increment if it's a hard failure from Flutter.
+    # If it's "pending", we just save the WAMID and wait for the webhook!
+    update_query = {
+        "$set": {"recipients.$.status": body.outcome, "recipients.$.error": body.error, "recipients.$.wamid": body.wamid}
+    }
+    if body.outcome == "failed":
+        update_query["$inc"] = {"failed_count": 1}
 
-    # Update the matching recipient entry in the array, and increment the
-    # right counter, in one atomic operation.
     await coll.update_one(
         {"restaurant_id": restaurant_id, "campaign_id": campaign_id, "recipients.phone": body.phone},
-        {
-            "$set": {"recipients.$.status": body.outcome, "recipients.$.error": body.error,"recipients.$.wamid": body.wamid},
-            "$inc": {inc_field: 1},
-        },
+        update_query
     )
 
     updated = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
 
-    # Auto-finalize once every recipient has a non-pending status.
-    total_done = updated["sent_count"] + updated["failed_count"]
-    if updated["status"] == "sending" and total_done >= updated["recipients_count"]:
-        if updated["failed_count"] == 0:
-            final_status = "completed"
-        elif updated["sent_count"] == 0:
+    # 🚀 FIX 2: Auto-finalize the campaign when Flutter finishes its loop
+    # (We know Flutter is done with a recipient if it has a WAMID or it failed)
+    processed_count = sum(1 for r in updated["recipients"] if r.get("wamid") or r["status"] == "failed")
+    
+    if updated["status"] == "sending" and processed_count >= updated["recipients_count"]:
+        final_status = "completed" if updated["failed_count"] == 0 else "partial"
+        if processed_count == updated["failed_count"]:
             final_status = "failed"
-        else:
-            final_status = "partial"
-
+            
         await coll.update_one(
             {"restaurant_id": restaurant_id, "campaign_id": campaign_id},
             {"$set": {"status": final_status}},
@@ -95,7 +80,6 @@ async def report_progress(db, restaurant_id: str, campaign_id: str, body: Campai
         updated["status"] = final_status
 
     return CampaignOut(**updated)
-
 
 async def cancel_campaign(db, restaurant_id: str, campaign_id: str):
     """Stops a campaign mid-send. Remaining 'pending' recipients are left

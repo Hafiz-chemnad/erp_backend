@@ -57,28 +57,27 @@ async def receive_webhook(request: Request):
                         upsert=True,
                     )
 
-                    # 2. 🚀 THE FIX: OVERWRITE THE "FAKE DATA" IN THE CAMPAIGNS DATABASE!
-                    if doc["status"] in ["delivered", "read"]:
+                    # 2. 🚀 THE FIX: LET META CONTROL THE "SENT" STATUS!
+                    if doc["status"] in ["sent", "delivered", "read"]:
                         await db.campaigns.update_one(
                             {"recipients": {"$elemMatch": {"wamid": doc["wamid"], "status": {"$ne": doc["status"]}}}},
                             {
                                 "$set": {"recipients.$.status": doc["status"]},
-                                "$inc": {f"{doc['status']}_count": 1}
+                                # This dynamically adds +1 to sent_count, delivered_count, or read_count!
+                                "$inc": {f"{doc['status']}_count": 1} 
                             }
                         )
                     elif doc["status"] == "failed":
-                        # Grab the exact error message from Meta
                         error_text = doc["errors"][0].get("title", "Meta Rejected") if doc.get("errors") else "Failed"
-                        
                         await db.campaigns.update_one(
                             {"recipients": {"$elemMatch": {"wamid": doc["wamid"], "status": {"$ne": "failed"}}}},
                             {
-                                # Change status to failed and save the error text
                                 "$set": {"recipients.$.status": "failed", "recipients.$.error": error_text},
-                                # 🚀 Fix the math! Subtract 1 from Sent, Add 1 to Failed
-                                "$inc": {"failed_count": 1, "sent_count": -1} 
+                                # 🚀 No longer subtracting from sent_count, because Flutter didn't add it!
+                                "$inc": {"failed_count": 1} 
                             }
                         )
+                        
 
                 # --- Incoming user messages ---
                 messages = value.get("messages", [])
