@@ -84,7 +84,8 @@ async def send_direct_message(
 ):
     from app.templates import meta_client 
     
-    success = await meta_client.send_template_message(
+    # 🚀 This now returns the WAMID string (or False if it failed)
+    wamid_result = await meta_client.send_template_message(
         phone_number_id=body.phone_number_id,
         access_token=body.access_token,
         to_phone=body.to_phone,
@@ -93,11 +94,13 @@ async def send_direct_message(
         body_params=body.body_params,
         header_type=body.header_type,
         media_url=body.media_url,
-        media_id=getattr(body, "media_id", None), # 🚀 Pass the new ID safely
-        button_url_param=getattr(body, "button_url_param", None),
+        media_id=body.media_id,
+        button_url_param=body.button_url_param
     )
     
-    if not success:
-        raise HTTPException(status_code=400, detail="Failed to send message via Meta.")
-    
-    return {"success": True, "message": "Sent successfully"}
+    # 🚀 Return the WAMID explicitly so Flutter can read it!
+    if wamid_result:
+        return {"wamid": wamid_result}
+    else:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Failed to send message")
