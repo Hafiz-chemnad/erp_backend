@@ -25,6 +25,7 @@ class CampaignProgressIn(BaseModel):
     phone: str
     outcome: Literal["sent", "failed"]
     error: Optional[str] = None
+    wamid: Optional[str] = None
 
 
 class RecipientOut(BaseModel):
@@ -48,6 +49,8 @@ class CampaignOut(BaseModel):
     label_id: Optional[str] = None
     recipients_count: int
     sent_count: int
+    delivered_count: int
+    read_count: int
     failed_count: int
     status: Literal["sending", "completed", "partial", "failed", "cancelled"]
     recipients: List[RecipientOut] = Field(default_factory=list)
@@ -70,6 +73,8 @@ class CampaignListItemOut(BaseModel):
     label_id: Optional[str] = None
     recipients_count: int
     sent_count: int
+    delivered_count: int
+    read_count: int
     failed_count: int
     status: str
     created_at: Optional[datetime] = None

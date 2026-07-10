@@ -33,6 +33,8 @@ async def start_campaign(db, restaurant_id: str, body: CampaignStartIn) -> Campa
         "recipients_count": len(recipients),
         "sent_count": 0,
         "failed_count": 0,
+        "delivered_count": 0, # 🚀 ADDED
+        "read_count": 0,      # 🚀 ADDED
         "status": "sending",
         "recipients": recipients,
         "created_at": now,
@@ -69,7 +71,7 @@ async def report_progress(db, restaurant_id: str, campaign_id: str, body: Campai
     await coll.update_one(
         {"restaurant_id": restaurant_id, "campaign_id": campaign_id, "recipients.phone": body.phone},
         {
-            "$set": {"recipients.$.status": body.outcome, "recipients.$.error": body.error},
+            "$set": {"recipients.$.status": body.outcome, "recipients.$.error": body.error,"recipients.$.wamid": body.wamid},
             "$inc": {inc_field: 1},
         },
     )

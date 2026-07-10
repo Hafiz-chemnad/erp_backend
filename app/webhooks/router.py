@@ -53,6 +53,24 @@ async def receive_webhook(request: Request):
                         {"$push": {"history": doc}, "$set": {"latest_status": doc["status"]}},
                         upsert=True,
                     )
+                    if doc["status"] in ["delivered", "read"]:
+                        await db.campaigns.update_one(
+                            {"recipients.wamid": doc["wamid"]},
+                            {
+                                "$set": {"recipients.$.status": doc["status"]},
+                                "$inc": {f"{doc['status']}_count": 1}
+                            }
+                        )
+                    elif doc["status"] == "failed":
+                        # Catch failures that happen asynchronously after sending
+                        error_text = doc["errors"][0].get("title", "Meta Rejected") if doc.get("errors") else "Failed"
+                        await db.campaigns.update_one(
+                            {"recipients.wamid": doc["wamid"], "recipients.status": {"$ne": "failed"}},
+                            {
+                                "$set": {"recipients.$.status": "failed", "recipients.$.error": error_text},
+                                "$inc": {"failed_count": 1}
+                            }
+                        )
 
                 # --- Incoming user messages (optional, but useful) ---
                 messages = value.get("messages", [])

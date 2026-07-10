@@ -250,7 +250,9 @@ async def send_template_message(
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(url, headers={"Authorization": f"Bearer {access_token}"}, json=payload)
             if response.status_code in [200, 201]:
-                return True
+               
+                # 🚀 Return the actual wamid string!
+                return response.json().get("messages", [{}])[0].get("id")
             else:
                 print(f"❌ SEND FAILED: {response.text}")
                 return False
