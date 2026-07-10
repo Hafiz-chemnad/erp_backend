@@ -7,12 +7,13 @@ from app.templates.schemas import TemplateCreateIn, TemplateOut, TemplateListRes
 logger = logging.getLogger(__name__)
 COLLECTION = "templates"
 
-def _extract_template_data(components: list) -> tuple[str, int, str, str | None]:
+def _extract_template_data(components: list) -> tuple[str, int, str, str | None, list | None]:
     body_text = ""
     var_count = 0
     header_type = "NONE"
     header_text = None
-    
+    buttons = None
+
     for comp in components:
         if comp.get("type") == "BODY":
             body_text = comp.get("text", "")
@@ -21,8 +22,11 @@ def _extract_template_data(components: list) -> tuple[str, int, str, str | None]
             header_type = comp.get("format", "NONE")
             if header_type == "TEXT":
                 header_text = comp.get("text")
-                
-    return body_text, var_count, header_type, header_text
+        elif comp.get("type") == "BUTTONS":
+            buttons = comp.get("buttons", [])
+
+    return body_text, var_count, header_type, header_text, buttons
+
 
 async def list_templates(db, restaurant_id: str) -> TemplateListResponse:
     coll = db[COLLECTION]
@@ -34,7 +38,6 @@ async def list_templates(db, restaurant_id: str) -> TemplateListResponse:
 # app/templates/service.py
 
 async def create_template(db, restaurant_id: str, body: TemplateCreateIn) -> TemplateOut | str:
-    # 🚀 Update method call to handle new arguments
     meta_response = await meta_client.create_template_in_meta(
         waba_id=body.waba_id,
         access_token=body.access_token,
@@ -42,10 +45,11 @@ async def create_template(db, restaurant_id: str, body: TemplateCreateIn) -> Tem
         category=body.category,
         language=body.language,
         body_text=body.body_text,
-        header_type=body.header_type,   # 🚀 ADDED
-        header_text=body.header_text    # 🚀 ADDED
+        header_type=body.header_type,
+        header_text=body.header_text,
+        buttons=[b.dict() for b in body.buttons] if body.buttons else None,  # 🚀 ADDED
     )
-    
+
     if not meta_response:
         return "meta_error"
 
@@ -66,16 +70,12 @@ async def create_template(db, restaurant_id: str, body: TemplateCreateIn) -> Tem
         "rejected_reason": None,
         "default_mappings": {},
         "created_at": now,
-        # 🚀 ADD TO MONGO SYSTEM TRACKING
         "header_type": body.header_type,
-        "header_text": body.header_text
+        "header_text": body.header_text,
+        "buttons": [b.dict() for b in body.buttons] if body.buttons else None,  # 🚀 ADDED
     }
-    
-    await coll.update_one(
-        {"restaurant_id": restaurant_id, "name": body.name},
-        {"$set": doc},
-        upsert=True
-    )
+
+    await coll.update_one({"restaurant_id": restaurant_id, "name": body.name}, {"$set": doc}, upsert=True)
     return TemplateOut(**doc)
 
 async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access_token: str) -> TemplateListResponse:
@@ -86,8 +86,8 @@ async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access
     coll = db[COLLECTION]
     
     for tmpl in meta_templates:
-        # 🚀 Use the new extractor
-        body_text, var_count, header_type, header_text = _extract_template_data(tmpl.get("components", []))
+        # 🚀 Use the new extractor (now also returns buttons)
+        body_text, var_count, header_type, header_text, buttons = _extract_template_data(tmpl.get("components", []))
         
         update_doc = {
             "template_id": tmpl.get("id", ""),
@@ -99,6 +99,7 @@ async def refresh_template_statuses(db, restaurant_id: str, waba_id: str, access
             "variable_count": var_count,
             "header_type": header_type, # 🚀 ADDED
             "header_text": header_text, # 🚀 ADDED
+            "buttons": buttons,         # 🚀 ADDED (new for buttons feature)
             "updated_at": datetime.now(timezone.utc)
         }
         

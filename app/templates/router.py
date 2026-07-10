@@ -93,7 +93,8 @@ async def send_direct_message(
         body_params=body.body_params,
         header_type=body.header_type,
         media_url=body.media_url,
-        media_id=getattr(body, "media_id", None) # 🚀 Pass the new ID safely
+        media_id=getattr(body, "media_id", None), # 🚀 Pass the new ID safely
+        button_url_param=getattr(body, "button_url_param", None),
     )
     
     if not success:

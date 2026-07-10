@@ -91,7 +91,8 @@ async def create_template_in_meta(
     language: str, 
     body_text: str,
     header_type: str = "NONE",
-    header_text: str | None = None
+    header_text: str | None = None,
+    buttons: list[dict] | None = None,
 ) -> dict | None:
     url = f"{GRAPH_BASE}/{waba_id}/message_templates"
     
@@ -122,6 +123,29 @@ async def create_template_in_meta(
             "format": "TEXT",
             "text": header_text
         })
+
+        # 🚀 NEW: BUTTONS component
+    if buttons:
+        # Enforce Meta's rules: max 3 QUICK_REPLY, max 2 URL, max 1 PHONE_NUMBER
+        quick_reply = [b for b in buttons if b["type"] == "QUICK_REPLY"][:3]
+        url_buttons = [b for b in buttons if b["type"] == "URL"][:2]
+        phone_buttons = [b for b in buttons if b["type"] == "PHONE_NUMBER"][:1]
+
+        button_objs = []
+        for b in quick_reply:
+            button_objs.append({"type": "QUICK_REPLY", "text": b["text"]})
+        for b in url_buttons:
+            btn = {"type": "URL", "text": b["text"], "url": b["url"]}
+            if "{{1}}" in b["url"]:
+                btn["example"] = [b["url"].replace("{{1}}", "sample-value")]
+            button_objs.append(btn)
+        for b in phone_buttons:
+            button_objs.append({
+                "type": "PHONE_NUMBER", "text": b["text"], "phone_number": b["phone_number"]
+            })
+
+        if button_objs:
+            components.append({"type": "BUTTONS", "buttons": button_objs})    
 
     payload = {
         "name": name,
@@ -172,7 +196,8 @@ async def send_template_message(
     body_params: list[str], 
     header_type: str = "NONE", 
     media_url: str = None,
-    media_id: str = None # 🚀 ADDED THIS
+    media_id: str = None, # 🚀 ADDED THIS
+    button_url_param: str = None,
 ) -> bool:
     
     url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
@@ -211,6 +236,15 @@ async def send_template_message(
             "parameters": body_parameters
         })
     # 🚀 ADD THIS EXACT LINE:
+
+    if button_url_param:
+        payload["template"]["components"].append({
+            "type": "button",
+            "sub_type": "url",
+            "index": "0",
+            "parameters": [{"type": "text", "text": button_url_param}]
+        })
+
     print(f"\n🚀 META PAYLOAD: {payload}\n")    
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
