@@ -25,7 +25,7 @@ async def add_contact(
     contact: ContactIn,
     db=Depends(get_database),
 ):
-    return await service.upsert_contact(db, restaurant_id, contact, source="manual")
+    return await service.upsert_contact(db, restaurant_id, contact, source=contact.source)  # 🚀 CHANGED
 
 
 @router.post("/bulk", response_model=ContactBulkResult)

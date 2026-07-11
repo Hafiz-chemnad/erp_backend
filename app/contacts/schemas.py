@@ -4,12 +4,10 @@ from datetime import datetime
 
 
 class ContactIn(BaseModel):
-    """What Flutter sends for a single Add Contact. phone is the identity
-    key (digits only, country code included — matches current app's
-    RegExp(r'[^0-9]') stripping before send)."""
     phone: str
     name: str
     status: str = "Active"
+    source: str = "manual"   # 🚀 ADDED — caller can override (e.g. "whatsapp")
 
 
 class ContactBulkRow(BaseModel):
