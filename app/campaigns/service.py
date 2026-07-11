@@ -17,10 +17,23 @@ async def start_campaign(db, restaurant_id: str, body: CampaignStartIn) -> Campa
     itself, so a later Resume can read them back and pre-fill the media
     step instead of forcing a full re-upload of the same asset."""
     coll = db[COLLECTION]
+    contacts_coll = db["contacts"]
     now = datetime.now(timezone.utc)
     campaign_id = f"camp_{int(now.timestamp() * 1000)}"
+    
+    incoming_phones = [r.phone for r in body.recipients]
 
-    recipients = [{"phone": r.phone, "status": "pending", "error": None, "wamid": None} for r in body.recipients]
+    blocked_cursor = contacts_coll.find({
+    "restaurant_id": restaurant_id,
+    "phone": {"$in": incoming_phones},
+    "status": "Blocked"
+    })
+    blocked_docs = await blocked_cursor.to_list(length=None)
+    blocked_phones = {doc["phone"] for doc in blocked_docs}
+    recipients = [
+    {"phone": r.phone, "status": "pending", "error": None, "wamid": None} 
+    for r in body.recipients if r.phone not in blocked_phones # 🚀 THE FILTER
+    ]
 
     doc = {
         "restaurant_id": restaurant_id,
@@ -34,7 +47,7 @@ async def start_campaign(db, restaurant_id: str, body: CampaignStartIn) -> Campa
         "failed_count": 0,
         "delivered_count": 0,
         "read_count": 0,
-        "status": "sending",
+        "status": "sending" if len(recipients) > 0 else "completed",
         "recipients": recipients,
         "media_id": body.media_id,
         "media_url": body.media_url,

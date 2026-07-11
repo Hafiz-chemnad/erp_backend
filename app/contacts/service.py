@@ -76,6 +76,10 @@ async def upsert_contact(db, restaurant_id: str, contact: ContactIn, source: str
     if _is_placeholder_name(existing.get("name", ""), phone) and incoming_name != phone:
         update_fields["name"] = incoming_name
 
+    # 🚀 ADD THIS: Allow the status to be updated (Blocked <-> Active)
+    if existing.get("status") != contact.status:
+        update_fields["status"] = contact.status    
+
     if update_fields:
         await coll.update_one(
             {"restaurant_id": restaurant_id, "phone": phone},
