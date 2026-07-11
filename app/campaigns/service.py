@@ -8,20 +8,19 @@ COLLECTION = "campaigns"
 
 
 def _project_list_item(doc: dict) -> dict:
-    """Strips the (potentially large) recipients array for list views."""
     return {k: v for k, v in doc.items() if k != "recipients"}
 
 
 async def start_campaign(db, restaurant_id: str, body: CampaignStartIn) -> CampaignOut:
-    """Creates the campaign record the MOMENT the user hits Launch —
-    before a single message has actually been sent. Every recipient
-    starts 'pending'. This is what makes live progress possible: the
-    record exists and is queryable from second one, not just at the end."""
+    """Creates the campaign record the MOMENT the user hits Launch.
+    🚀 FIX: now stores media_id/media_url/button_url_param on the record
+    itself, so a later Resume can read them back and pre-fill the media
+    step instead of forcing a full re-upload of the same asset."""
     coll = db[COLLECTION]
     now = datetime.now(timezone.utc)
     campaign_id = f"camp_{int(now.timestamp() * 1000)}"
 
-    recipients = [{"phone": r.phone, "status": "pending", "error": None} for r in body.recipients]
+    recipients = [{"phone": r.phone, "status": "pending", "error": None, "wamid": None} for r in body.recipients]
 
     doc = {
         "restaurant_id": restaurant_id,
@@ -33,10 +32,13 @@ async def start_campaign(db, restaurant_id: str, body: CampaignStartIn) -> Campa
         "recipients_count": len(recipients),
         "sent_count": 0,
         "failed_count": 0,
-        "delivered_count": 0, # 🚀 ADDED
-        "read_count": 0,      # 🚀 ADDED
+        "delivered_count": 0,
+        "read_count": 0,
         "status": "sending",
         "recipients": recipients,
+        "media_id": body.media_id,
+        "media_url": body.media_url,
+        "button_url_param": body.button_url_param,
         "created_at": now,
     }
     await coll.insert_one(doc)
@@ -46,11 +48,11 @@ async def start_campaign(db, restaurant_id: str, body: CampaignStartIn) -> Campa
 async def report_progress(db, restaurant_id: str, campaign_id: str, body: CampaignProgressIn):
     coll = db[COLLECTION]
     existing = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
-    if existing is None: return "not_found"
-    if existing.get("status") == "cancelled": return "cancelled"
+    if existing is None:
+        return "not_found"
+    if existing.get("status") == "cancelled":
+        return "cancelled"
 
-    # 🚀 FIX 1: Only increment if it's a hard failure from Flutter.
-    # If it's "pending", we just save the WAMID and wait for the webhook!
     update_query = {
         "$set": {"recipients.$.status": body.outcome, "recipients.$.error": body.error, "recipients.$.wamid": body.wamid}
     }
@@ -64,15 +66,13 @@ async def report_progress(db, restaurant_id: str, campaign_id: str, body: Campai
 
     updated = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
 
-    # 🚀 FIX 2: Auto-finalize the campaign when Flutter finishes its loop
-    # (We know Flutter is done with a recipient if it has a WAMID or it failed)
     processed_count = sum(1 for r in updated["recipients"] if r.get("wamid") or r["status"] == "failed")
-    
+
     if updated["status"] == "sending" and processed_count >= updated["recipients_count"]:
         final_status = "completed" if updated["failed_count"] == 0 else "partial"
         if processed_count == updated["failed_count"]:
             final_status = "failed"
-            
+
         await coll.update_one(
             {"restaurant_id": restaurant_id, "campaign_id": campaign_id},
             {"$set": {"status": final_status}},
@@ -81,16 +81,14 @@ async def report_progress(db, restaurant_id: str, campaign_id: str, body: Campai
 
     return CampaignOut(**updated)
 
+
 async def cancel_campaign(db, restaurant_id: str, campaign_id: str):
-    """Stops a campaign mid-send. Remaining 'pending' recipients are left
-    as-is (they were never sent to) so the record shows exactly how far
-    the campaign got before being stopped."""
     coll = db[COLLECTION]
     existing = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
     if existing is None:
         return "not_found"
     if existing.get("status") != "sending":
-        return "not_active"  # already finished/cancelled — nothing to stop
+        return "not_active"
 
     await coll.update_one(
         {"restaurant_id": restaurant_id, "campaign_id": campaign_id},
@@ -101,10 +99,6 @@ async def cancel_campaign(db, restaurant_id: str, campaign_id: str):
 
 
 async def delete_campaign(db, restaurant_id: str, campaign_id: str):
-    """Refuses to delete a campaign that's still actively sending — it
-    must be cancelled first. This stops the tracking record from being
-    ripped out from under an in-flight client-side send loop that's still
-    calling report_progress() against it."""
     coll = db[COLLECTION]
     existing = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
     if existing is None:
@@ -135,24 +129,24 @@ async def list_campaigns(db, restaurant_id: str, page: int = 1, limit: int = 50)
 
 
 async def get_campaign(db, restaurant_id: str, campaign_id: str):
-    """Full detail including per-recipient statuses — used for a future
-    'retry failed only' view, or just to inspect exactly who failed."""
     coll = db[COLLECTION]
     doc = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
     if doc is None:
         return "not_found"
     return CampaignOut(**doc)
 
+
 async def resume_campaign(db, restaurant_id: str, campaign_id: str):
-    """Flips a cancelled campaign back to sending status."""
     coll = db[COLLECTION]
     existing = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
-    if existing is None: return "not_found"
-    if existing.get("status") not in ["cancelled", "partial"]: return "invalid_state"
+    if existing is None:
+        return "not_found"
+    if existing.get("status") not in ["cancelled", "partial"]:
+        return "invalid_state"
 
     await coll.update_one(
         {"restaurant_id": restaurant_id, "campaign_id": campaign_id},
         {"$set": {"status": "sending"}},
     )
     updated = await coll.find_one({"restaurant_id": restaurant_id, "campaign_id": campaign_id})
-    return CampaignOut(**updated)    
+    return CampaignOut(**updated)

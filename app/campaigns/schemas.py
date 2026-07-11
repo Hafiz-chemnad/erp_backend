@@ -10,38 +10,43 @@ class CampaignRecipientIn(BaseModel):
 
 class CampaignStartIn(BaseModel):
     """What Flutter sends the moment 'Launch Campaign' is pressed, BEFORE
-    any message actually goes out. This lets the backend track progress
-    live as the client's send loop reports back per-recipient outcomes."""
+    any message actually goes out."""
     name: str
     template_name: str
     audience_type: Literal["All", "Label"]
-    label_id: Optional[str] = None  # only set when audience_type == "Label"
+    label_id: Optional[str] = None
     recipients: List[CampaignRecipientIn]
+    # 🚀 FIX: persist media/button choices with the campaign record so a
+    # later Resume doesn't force the user to re-upload the same asset.
+    media_id: Optional[str] = None
+    media_url: Optional[str] = None
+    button_url_param: Optional[str] = None
 
 
 class CampaignProgressIn(BaseModel):
-    """Sent once per recipient, right after that single WhatsApp send
-    attempt completes (success or failure)."""
     phone: str
-    outcome: Literal["pending","sent", "failed"]
+    outcome: Literal["pending", "sent", "failed"]
     error: Optional[str] = None
     wamid: Optional[str] = None
 
 
 class RecipientOut(BaseModel):
+    """🚀 FIX: status was Literal["pending","sent","failed"] — the webhook
+    writes 'delivered'/'read' straight into Mongo with no validation, so
+    the FIRST time any recipient reached one of those states, every read
+    of this campaign (GET detail, report_progress's own return value)
+    crashed with a Pydantic validation error. Also added 'wamid', which
+    was being written by the webhook/progress handlers but silently
+    dropped on every read since it wasn't declared here."""
     phone: str
-    status: Literal["pending", "sent", "failed"]
+    status: Literal["pending", "sent", "delivered", "read", "failed"]
     error: Optional[str] = None
+    wamid: Optional[str] = None
 
 
 class CampaignOut(BaseModel):
-    """Response shape. NOTE ON ALIASES: every field below is intentionally
-    given the SAME name Dart reads it as — no alias tricks this time. The
-    labels module aliased 'id'->'label_id' and 'date'->'created_at', which
-    silently broke the Dart client because FastAPI serializes response
-    models BY ALIAS by default (so the JSON key becomes the alias, not the
-    Python field name). To avoid repeating that bug, this schema keeps
-    field name == JSON key == what campaign_api.dart reads, everywhere."""
+    """Response shape. Field names intentionally match Dart's reads
+    exactly — no alias tricks (see labels module for why that matters)."""
     campaign_id: str
     name: str
     template_name: str
@@ -49,11 +54,14 @@ class CampaignOut(BaseModel):
     label_id: Optional[str] = None
     recipients_count: int
     sent_count: int
-    delivered_count: int=0
-    read_count: int=0
+    delivered_count: int = 0
+    read_count: int = 0
     failed_count: int
     status: Literal["sending", "completed", "partial", "failed", "cancelled"]
     recipients: List[RecipientOut] = Field(default_factory=list)
+    media_id: Optional[str] = None
+    media_url: Optional[str] = None
+    button_url_param: Optional[str] = None
     created_at: Optional[datetime] = None
 
     class Config:
@@ -61,11 +69,7 @@ class CampaignOut(BaseModel):
 
 
 class CampaignListItemOut(BaseModel):
-    """Lightweight version for the list view — omits the full recipients
-    array (could be thousands of entries) since the Campaigns tab only
-    needs counts/status for the table. Full recipient detail is fetched
-    separately via GET /campaigns/{campaign_id} if/when needed (e.g. a
-    future 'retry failed only' screen)."""
+    """Lightweight version for the list view — omits recipients array."""
     campaign_id: str
     name: str
     template_name: str
@@ -73,8 +77,8 @@ class CampaignListItemOut(BaseModel):
     label_id: Optional[str] = None
     recipients_count: int
     sent_count: int
-    delivered_count: int=0
-    read_count: int=0
+    delivered_count: int = 0
+    read_count: int = 0
     failed_count: int
     status: str
     created_at: Optional[datetime] = None
