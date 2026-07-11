@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pymongo import UpdateOne
+from pymongo import InsertOne, UpdateOne
 from app.contacts.schemas import (
     ContactIn, ContactBulkIn, ContactLabelsUpdate,
     ContactOut, ContactListResponse, ContactBulkResult,
@@ -91,76 +92,89 @@ async def upsert_contact(db, restaurant_id: str, contact: ContactIn, source: str
 
 
 async def bulk_import_contacts(db, restaurant_id: str, body: ContactBulkIn) -> ContactBulkResult:
-    """Bulk CSV import. Runs duplicate-checking against Mongo directly
-    (not a client-side cache), and applies the same Option B enrichment
-    rule per-row. Uses a single bulk_write for the actual DB round-trip;
-    the enrichment decision (does the existing name need updating?) still
-    needs a per-phone read first since it depends on current state.
-    """
     coll = db[COLLECTION]
+    labels_coll = db[LABELS_COLLECTION] # 🚀 NEW: We need to check/create labels
     now = datetime.now(timezone.utc)
-
+    
     added = 0
     enriched = 0
     duplicate = 0
     invalid = 0
-    seen_in_file = set()
-
-    # Pull all existing phones for this restaurant once, instead of one
-    # find_one per row — cheap for realistic contact-list sizes and avoids
-    # N sequential queries for a large CSV.
-    existing_docs = await coll.find(
-        {"restaurant_id": restaurant_id},
-        {"phone": 1, "name": 1},
-    ).to_list(length=None)
-    existing_by_phone = {d["phone"]: d for d in existing_docs}
 
     operations = []
 
     for row in body.rows:
-        phone = "".join(ch for ch in row.phone if ch.isdigit())
-        name = row.name.strip()
-
-        if len(phone) < 8:
+        phone = "".join(filter(str.isdigit, row.phone))
+        if not phone or len(phone) < 8:
             invalid += 1
             continue
-        if phone in seen_in_file:
-            duplicate += 1
-            continue
-        seen_in_file.add(phone)
 
-        incoming_name = name or phone
-        existing = existing_by_phone.get(phone)
+        incoming_name = row.name.strip()
+        
+        # =========================================================
+        # 🚀 THE LABEL LOGIC: Find or Dynamically Create the Label
+        # =========================================================
+        label_id_to_add = None
+        if row.label:
+            label_name = row.label.strip()
+            if label_name:
+                existing_label = await labels_coll.find_one({"restaurant_id": restaurant_id, "name": label_name})
+                if existing_label:
+                    label_id_to_add = existing_label["label_id"]
+                else:
+                    new_label_id = f"lbl_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+                    await labels_coll.insert_one({
+                        "restaurant_id": restaurant_id,
+                        "label_id": new_label_id,
+                        "name": label_name,
+                        "description": "Imported via CSV",
+                        "contact_count": 0,
+                        "is_automated": False,
+                        "created_at": now
+                    })
+                    label_id_to_add = new_label_id
+        # =========================================================
 
+        existing = await coll.find_one({"restaurant_id": restaurant_id, "phone": phone})
         if existing is None:
-            operations.append(UpdateOne(
-                {"restaurant_id": restaurant_id, "phone": phone},
-                {"$setOnInsert": {
-                    "restaurant_id": restaurant_id,
-                    "phone": phone,
-                    "name": incoming_name,
-                    "status": "Active",
-                    "label_ids": [],
-                    "source": "csv_import",
-                    "created_at": now,
-                }},
-                upsert=True,
-            ))
+            operations.append(InsertOne({
+                "restaurant_id": restaurant_id,
+                "phone": phone,
+                "name": incoming_name if incoming_name else phone,
+                "status": "Active",
+                "label_ids": [label_id_to_add] if label_id_to_add else [], # 🚀 Attach label if it exists
+                "source": "csv_import",
+                "created_at": now
+            }))
             added += 1
-        elif _is_placeholder_name(existing.get("name", ""), phone) and incoming_name != phone:
-            operations.append(UpdateOne(
-                {"restaurant_id": restaurant_id, "phone": phone},
-                {"$set": {"name": incoming_name}},
-            ))
-            enriched += 1
         else:
-            duplicate += 1
+            update_doc = {}
+            set_fields = {}
+            
+            # Enrich name if existing is a placeholder
+            if _is_placeholder_name(existing.get("name", ""), phone) and incoming_name != phone:
+                set_fields["name"] = incoming_name
+                
+            if set_fields:
+                update_doc["$set"] = set_fields
+                
+            # 🚀 Add the label to this existing contact safely
+            if label_id_to_add:
+                update_doc["$addToSet"] = {"label_ids": label_id_to_add}
+
+            if update_doc:
+                operations.append(UpdateOne(
+                    {"restaurant_id": restaurant_id, "phone": phone},
+                    update_doc
+                ))
+                enriched += 1
+            else:
+                duplicate += 1
 
     if operations:
         await coll.bulk_write(operations, ordered=False)
 
     return ContactBulkResult(added=added, enriched=enriched, duplicate=duplicate, invalid=invalid)
-
 
 async def update_contact_labels(db, restaurant_id: str, phone: str, body: ContactLabelsUpdate):
     """Full-replacement of a contact's label_ids. Returns 'not_found' if the

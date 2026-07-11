@@ -15,6 +15,7 @@ class ContactBulkRow(BaseModel):
     same as today's Flutter behaviour)."""
     phone: str
     name: str = ""
+    label: Optional[str] = None
 
 
 class ContactBulkIn(BaseModel):
