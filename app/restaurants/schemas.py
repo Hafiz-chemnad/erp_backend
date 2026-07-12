@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 
 
@@ -38,6 +38,14 @@ class RestaurantIn(BaseModel):
     welcomeVideoUrl: Optional[str] = None
     welcomeVideoMediaId: Optional[str] = None
 
+    # Pass-through only — the bot conversation engine (still living in the
+    # Node backend, not yet migrated) reads this to drive the WhatsApp
+    # ordering flow. Flutter never sends or edits these, but we preserve
+    # them so no data is lost when a restaurant is created/updated through
+    # this new backend. Stored/returned as-is, no internal validation.
+    flows: Optional[list[dict[str, Any]]] = None
+    catalogItems: Optional[list[Any]] = None
+
     model_config = ConfigDict(extra="ignore")  # tolerate stray fields (e.g. old "menu": [{}]) without erroring
 
 
@@ -69,6 +77,8 @@ class RestaurantOut(BaseModel):
     googleSheetId: str = ""
     welcomeVideoUrl: str = ""
     welcomeVideoMediaId: str = ""
+    flows: list[dict[str, Any]] = Field(default_factory=list)
+    catalogItems: list[Any] = Field(default_factory=list)
     createdAt: Optional[datetime] = None
     updatedAt: Optional[datetime] = None
 
