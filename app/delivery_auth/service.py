@@ -1,17 +1,16 @@
 from datetime import datetime, timedelta, timezone
-from passlib.context import CryptContext
+import bcrypt
 from jose import jwt, JWTError
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    hashed = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    return hashed.decode("utf-8")
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return pwd_context.verify(password, password_hash)
+    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
 
 
 def create_token(restaurant_id: str, delivery_boy_id: str, phone: str) -> str:
