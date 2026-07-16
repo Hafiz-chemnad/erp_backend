@@ -41,3 +41,9 @@ async def ensure_indexes():
     await db.delivery_boy_auth.create_index(
     [("restaurant_id", 1), ("phone", 1)], unique=True
     )
+    await db.order_assignments.create_index(
+    [("restaurant_id", 1), ("order_id", 1)], unique=True
+    )
+    await db.order_assignments.create_index(
+    [("restaurant_id", 1), ("delivery_boy_phone", 1), ("delivery_status", 1)]
+    )
