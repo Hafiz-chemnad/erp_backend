@@ -9,7 +9,7 @@ from app.webhooks.router import router as webhooks_router
 from app.restaurants.router import router as restaurants_router
 from app.delivery_auth.router import router as delivery_auth_router
 from app.order_assignments.router import router as order_assignments_router
-
+from app.delivery_boys.router import router as delivery_boys_router
 
 app = FastAPI(title="WhatsApp ERP - CRM Backend")
 
@@ -34,3 +34,4 @@ app.include_router(webhooks_router)
 app.include_router(restaurants_router)
 app.include_router(delivery_auth_router)
 app.include_router(order_assignments_router)
+app.include_router(delivery_boys_router)
