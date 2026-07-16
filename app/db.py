@@ -38,3 +38,6 @@ async def ensure_indexes():
     )
     await db.message_events.create_index([("wamid", 1)], unique=True)
     await db.restaurants.create_index([("name", 1)])
+    await db.delivery_boy_auth.create_index(
+    [("restaurant_id", 1), ("phone", 1)], unique=True
+    )

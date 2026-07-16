@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     MONGO_URI: str = "mongodb://localhost:27017"
     DB_NAME: str = "whatsapp_erp_crm"
     META_VERIFY_TOKEN: str = "verify123"
+    JWT_SECRET: str = "change-me-in-render-env"
+    JWT_EXPIRE_DAYS: int = 30
 
     class Config:
         env_file = ".env"
