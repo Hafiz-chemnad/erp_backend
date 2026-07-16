@@ -8,23 +8,31 @@ from app.delivery_auth.service import hash_password, verify_password, create_tok
 router = APIRouter(prefix="/api/{restaurant_id}/delivery-boys", tags=["delivery-auth"])
 
 
+from pymongo.errors import DuplicateKeyError
+
 @router.post("/register", response_model=TokenResponse)
 async def register(restaurant_id: str, body: DeliveryBoyRegister):
     db = get_database()
 
-    existing = await db.delivery_boy_auth.find_one(
+    existing_auth = await db.delivery_boy_auth.find_one(
         {"restaurant_id": restaurant_id, "phone": body.phone}
     )
-    if existing:
+    if existing_auth:
         raise HTTPException(status_code=409, detail="Phone already registered for this restaurant")
 
-    delivery_boy_doc = {
-        "restaurant_id": restaurant_id,
-        "name": body.name,
-        "phone": body.phone,
-        "created_at": datetime.now(timezone.utc),
-    }
-    result = await db.delivery_boys.insert_one(delivery_boy_doc)
+    try:
+        result = await db.delivery_boys.insert_one({
+            "restaurant_id": restaurant_id,
+            "name": body.name,
+            "phone": body.phone,
+            "created_at": datetime.now(timezone.utc),
+        })
+    except DuplicateKeyError:
+        raise HTTPException(
+            status_code=409,
+            detail="This phone number already exists as a delivery boy for this restaurant. Ask an admin to reset their password instead of registering again."
+        )
+
     delivery_boy_id = str(result.inserted_id)
 
     await db.delivery_boy_auth.insert_one({
@@ -37,7 +45,6 @@ async def register(restaurant_id: str, body: DeliveryBoyRegister):
 
     token = create_token(restaurant_id, delivery_boy_id, body.phone)
     return TokenResponse(token=token, delivery_boy_id=delivery_boy_id, name=body.name)
-
 
 @router.post("/login", response_model=TokenResponse)
 async def login(restaurant_id: str, body: DeliveryBoyLogin):
