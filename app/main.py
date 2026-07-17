@@ -11,6 +11,8 @@ from app.delivery_auth.router import router as delivery_auth_router
 from app.order_assignments.router import router as order_assignments_router
 from app.delivery_boys.router import router as delivery_boys_router
 from app.delivery_auth.login_router import login_router
+from app.delivery_settings.router import router as delivery_settings_router
+
 
 app = FastAPI(title="WhatsApp ERP - CRM Backend")
 
@@ -37,3 +39,4 @@ app.include_router(delivery_auth_router)
 app.include_router(order_assignments_router)
 app.include_router(delivery_boys_router)
 app.include_router(login_router)
+app.include_router(delivery_settings_router)
