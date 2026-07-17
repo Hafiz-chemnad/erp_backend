@@ -1,6 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from app.db import get_database
-from app.order_assignments.models import AssignOrderRequest, AssignmentOut
+from app.order_assignments.models import AssignOrderRequest, AssignmentOut, UpdateAssignmentStatusRequest
 from app.order_assignments import service
 
 router = APIRouter(prefix="/api/{restaurant_id}", tags=["order-assignments"])
@@ -22,3 +22,16 @@ async def get_assignments(restaurant_id: str):
 async def get_orders_for_delivery_boy(restaurant_id: str, phone: str):
     db = get_database()
     return await service.list_assignments_for_delivery_boy(db, restaurant_id, phone)
+
+
+@router.put("/assignments/{assignment_id}/status", response_model=AssignmentOut)
+async def update_status(restaurant_id: str, assignment_id: str, body: UpdateAssignmentStatusRequest):
+    db = get_database()
+    try:
+        updated = await service.update_assignment_status(db, assignment_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    return updated
