@@ -1,9 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.db import get_database
-from app.delivery_boys.schemas import DeliveryBoyIn, DeliveryBoyOut, DeliveryBoyListResponse, DeliveryBoyUpdate
 from app.delivery_boys import service
+from app.delivery_boys.schemas import DeliveryBoyIn, DeliveryBoyOut, DeliveryBoyListResponse, DeliveryBoyUpdate
 
 router = APIRouter(prefix="/api/{restaurant_id}/delivery-boys", tags=["delivery_boys"])
+
+
+@router.get("", response_model=DeliveryBoyListResponse)
+async def list_delivery_boys(
+    restaurant_id: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=100),
+    db=Depends(get_database),
+):
+    return await service.list_delivery_boys(db, restaurant_id, page, limit)
 
 
 @router.post("", response_model=DeliveryBoyOut)
