@@ -7,6 +7,7 @@ COLLECTION = "restaurant_delivery_settings"
 _DEFAULTS = {
     "send_pickup_message": False,
     "send_delivered_message": True,
+    "delivery_charge": 0.0,
 }
 
 
@@ -21,19 +22,19 @@ async def get_settings(db, restaurant_id: str) -> DeliverySettingsOut:
         restaurant_id=restaurant_id,
         send_pickup_message=doc.get("send_pickup_message", _DEFAULTS["send_pickup_message"]),
         send_delivered_message=doc.get("send_delivered_message", _DEFAULTS["send_delivered_message"]),
+        delivery_charge=doc.get("delivery_charge", _DEFAULTS["delivery_charge"]),
     )
 
 
 async def update_settings(db, restaurant_id: str, body: DeliverySettingsUpdate) -> DeliverySettingsOut:
     coll = db[COLLECTION]
-
-    # Only set fields that were actually provided — lets the restaurant app
-    # flip one switch without clobbering the other.
     update_fields = {}
     if body.send_pickup_message is not None:
         update_fields["send_pickup_message"] = body.send_pickup_message
     if body.send_delivered_message is not None:
         update_fields["send_delivered_message"] = body.send_delivered_message
+    if body.delivery_charge is not None:
+        update_fields["delivery_charge"] = body.delivery_charge
 
     if update_fields:
         await coll.update_one(
