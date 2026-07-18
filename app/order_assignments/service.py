@@ -23,6 +23,7 @@ def _serialize(doc: dict) -> dict:
         "accepted_at": _iso(doc.get("accepted_at")),
         "picked_up_at": _iso(doc.get("picked_up_at")),
         "delivered_at": _iso(doc.get("delivered_at")),
+        "delivery_charge": doc.get("delivery_charge", 0.0),
     }
 
 
@@ -43,6 +44,7 @@ async def create_assignment(db, restaurant_id: str, order_id: str, body: AssignO
         "accepted_at": None,
         "picked_up_at": None,
         "delivered_at": None,
+        "delivery_charge": body.delivery_charge,
     }
     await db.order_assignments.update_one(
         {"restaurant_id": restaurant_id, "order_id": order_id},
