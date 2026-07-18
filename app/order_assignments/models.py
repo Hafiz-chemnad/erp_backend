@@ -6,6 +6,7 @@ class AssignOrderRequest(BaseModel):
     delivery_boy_phone: str
     delivery_boy_name: str
     order_snapshot: dict[str, Any]
+    delivery_charge: float = 0.0
 
 
 class UpdateAssignmentStatusRequest(BaseModel):
@@ -29,3 +30,4 @@ class AssignmentOut(BaseModel):
     accepted_at: str | None = None
     picked_up_at: str | None = None
     delivered_at: str | None = None
+    delivery_charge: float = 0.0
