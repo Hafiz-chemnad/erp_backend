@@ -4,7 +4,14 @@ from app.order_assignments.models import AssignOrderRequest, UpdateAssignmentSta
 
 
 def _iso(dt) -> str | None:
-    return dt.isoformat() if dt else None
+    if not dt:
+        return None
+    # Mongo can return naive datetimes after a round-trip even though we
+    # always write them as UTC — force the UTC marker back on so clients
+    # (Dart's DateTime.parse + .toLocal()) convert correctly.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 def _serialize(doc: dict) -> dict:
