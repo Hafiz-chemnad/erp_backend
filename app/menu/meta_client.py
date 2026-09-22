@@ -117,6 +117,7 @@ async def fetch_catalog_from_meta(catalog_id: str, access_token: str) -> list[di
                     next_url, headers={"Authorization": f"Bearer {access_token}"}
                 )
                 if response.status_code != 200:
+                    print("META CATALOG FETCH ERROR:", response.status_code, response.text)
                     break
 
                 decoded = response.json()
@@ -126,7 +127,7 @@ async def fetch_catalog_from_meta(catalog_id: str, access_token: str) -> list[di
                 paging = decoded.get("paging") or {}
                 cursors = paging.get("cursors") or {}
                 next_url = paging.get("next") if cursors.get("after") else None
-    except Exception:
-        pass
+    except Exception as e:
+        print("META CATALOG FETCH EXCEPTION:", repr(e))
 
     return all_items

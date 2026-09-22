@@ -1,90 +1,133 @@
-from fastapi import APIRouter, Request, Query, HTTPException
-from app.db import get_database
+"""
+Meta WhatsApp webhook — receives:
+  1. GET  /webhook  -> verification handshake (unchanged from before)
+  2. POST /webhook   -> incoming messages + delivery status callbacks
+
+Incoming messages now get routed into the bot engine instead of just logged.
+"""
+
+from fastapi import APIRouter, Request, Response, Query
 from app.core.config import settings
-import logging
+from app.db import get_database
+from app.bot_engine.engine import handle_message
+from app.bot_engine.meta_sender import send_text
+from app.billing import service as billing_service
+from app.restaurant_messages import service as rm_service
+from datetime import datetime, timezone
 
-logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/webhook", tags=["webhook"])
+router = APIRouter()
 
 
-# 🚀 STEP 1: Meta calls this ONCE when you register the webhook URL in the
-# Meta App Dashboard. It must echo back "hub.challenge" exactly, or Meta
-# will refuse to save your webhook URL.
-@router.get("")
+@router.get("/webhook")
 async def verify_webhook(
-    hub_mode: str = Query(None, alias="hub.mode"),
-    hub_verify_token: str = Query(None, alias="hub.verify_token"),
-    hub_challenge: str = Query(None, alias="hub.challenge"),
+    hub_mode: str = Query(alias="hub.mode"),
+    hub_verify_token: str = Query(alias="hub.verify_token"),
+    hub_challenge: str = Query(alias="hub.challenge"),
 ):
     if hub_mode == "subscribe" and hub_verify_token == settings.META_VERIFY_TOKEN:
-        return int(hub_challenge)
-    raise HTTPException(status_code=403, detail="Verification failed")
+        return Response(content=hub_challenge, media_type="text/plain")
+    return Response(status_code=403)
 
 
-# 🚀 STEP 2: Meta POSTs here every time a message status changes
-# (sent -> delivered -> read, or failed with an error code/reason).
-# THIS is the only authoritative source of "did it actually reach the phone."
-@router.post("")
+@router.post("/webhook")
 async def receive_webhook(request: Request):
     body = await request.json()
-    print(f"\n🔥 RAW META WEBHOOK: {body}\n", flush=True) 
-    
     db = get_database()
+
     try:
-        entries = body.get("entry", [])
-        for entry in entries:
-            changes = entry.get("changes", [])
-            for change in changes:
-                value = change.get("value", {})
+        entry = body["entry"][0]
+        change = entry["changes"][0]
+        value = change["value"]
+        metadata = value.get("metadata", {})
+        phone_number_id = metadata.get("phone_number_id")
 
-                # --- Message status updates (sent/delivered/read/failed) ---
-                statuses = value.get("statuses", [])
-                for status in statuses:
-                    doc = {
-                        "wamid": status.get("id"),
-                        "recipient_id": status.get("recipient_id"),
-                        "status": status.get("status"),
-                        "timestamp": status.get("timestamp"),
-                        "errors": status.get("errors"),
-                        "raw": status,
-                    }
-                    print(f"\n📬 WA STATUS: {doc}\n", flush=True)
-                    
-                    # 1. Save to your message events database
-                    await db.message_events.update_one(
-                        {"wamid": doc["wamid"]},
-                        {"$push": {"history": doc}, "$set": {"latest_status": doc["status"]}},
-                        upsert=True,
-                    )
+        # ── Delivery status callbacks (sent/delivered/read/failed) ────────
+        if "statuses" in value:
+            for status in value["statuses"]:
+                wamid = status.get("id")
+                new_status = status.get("status")
+                await db.message_events.update_one(
+                    {"wamid": wamid},
+                    {"$set": {"status": new_status, "updatedAt": datetime.now(timezone.utc)}},
+                    upsert=True,
+                )
+            return {"ok": True}
 
-                    # 2. 🚀 THE FIX: LET META CONTROL THE "SENT" STATUS!
-                    if doc["status"] in ["sent", "delivered", "read"]:
-                        await db.campaigns.update_one(
-                            {"recipients": {"$elemMatch": {"wamid": doc["wamid"], "status": {"$ne": doc["status"]}}}},
-                            {
-                                "$set": {"recipients.$.status": doc["status"]},
-                                # This dynamically adds +1 to sent_count, delivered_count, or read_count!
-                                "$inc": {f"{doc['status']}_count": 1} 
-                            }
+        # ── Incoming customer messages ─────────────────────────────────
+        if "messages" in value:
+            restaurant = await db.restaurants.find_one({"phoneNumberId": phone_number_id})
+            if not restaurant:
+                return {"ok": True}  # unknown number, ignore
+
+            for msg in value["messages"]:
+                customer_number = msg["from"]
+                message_type = msg.get("type", "text")
+
+                # log raw inbound message (matches tymdb.messagelogs)
+                await db.messagelogs.insert_one({
+                    "customerId": customer_number,
+                    "phoneNumberId": phone_number_id,
+                    "messageType": message_type,
+                    "messageText": msg.get("text", {}).get("body", "") if message_type == "text" else "",
+                    "rawMessage": msg,
+                    "createdAt": datetime.now(timezone.utc),
+                })
+
+                # log to chat thread (matches tymdb.usermessagelogs)
+                content = msg.get("text", {}).get("body") if message_type == "text" else msg.get(message_type, {})
+                await rm_service.store_message({
+                    "restaurantId": str(restaurant["_id"]),
+                    "customerNumber": customer_number,
+                    "phoneNumberId": phone_number_id,
+                    "customerId": customer_number,
+                    "direction": "inbound",
+                    "messageType": message_type,
+                    "messageContent": content,
+                })
+
+                # ── Phone-order delivery location pin ──────────────────
+                # A location message from a customer who has a phone-delivery
+                # order awaiting their pin gets matched and attached here,
+                # BEFORE the bot engine sees it — this is deliberately
+                # separate from the bot's own scripted "location" step so
+                # the normal WhatsApp bot-ordering flow is untouched.
+                if message_type == "location":
+                    try:
+                        pending = await billing_service.find_pending_location_request(
+                            db, str(restaurant["_id"]), customer_number
                         )
-                    elif doc["status"] == "failed":
-                        error_text = doc["errors"][0].get("title", "Meta Rejected") if doc.get("errors") else "Failed"
-                        await db.campaigns.update_one(
-                            {"recipients": {"$elemMatch": {"wamid": doc["wamid"], "status": {"$ne": "failed"}}}},
-                            {
-                                "$set": {"recipients.$.status": "failed", "recipients.$.error": error_text},
-                                # 🚀 No longer subtracting from sent_count, because Flutter didn't add it!
-                                "$inc": {"failed_count": 1} 
-                            }
-                        )
-                        
+                        if pending:
+                            loc = msg.get("location", {})
+                            lat = loc.get("latitude")
+                            lng = loc.get("longitude")
+                            if lat is not None and lng is not None:
+                                await billing_service.attach_location_and_confirm(
+                                    db, str(restaurant["_id"]), pending["orderId"], lat, lng, loc.get("address")
+                                )
+                                await billing_service.clear_pending_location_request(
+                                    db, str(restaurant["_id"]), customer_number
+                                )
+                                await send_text(
+                                    phone_number_id, customer_number,
+                                    "Location received ✅ Your order is confirmed and will be delivered soon!",
+                                    restaurant.get("waToken"),
+                                )
+                            continue  # don't also hand this message to the bot engine
+                    except Exception:
+                        # a failure here shouldn't break the rest of the webhook —
+                        # fall through to normal bot handling below
+                        pass
 
-                # --- Incoming user messages ---
-                messages = value.get("messages", [])
-                for msg in messages:
-                    print(f"\n📩 INCOMING MSG: {msg}\n", flush=True)
+                # hand off to the bot engine — a single failed send inside
+                # the bot flow shouldn't 500 the whole webhook (Meta would
+                # otherwise retry and reprocess this message repeatedly)
+                try:
+                    await handle_message(restaurant, msg, customer_number)
+                except Exception:
+                    pass
 
-    except Exception as e:
-        print(f"❌ Webhook error: {e}", flush=True)
+        return {"ok": True}
 
-    return {"status": "received"}
+    except (KeyError, IndexError):
+        # malformed/unexpected payload shape — ignore rather than 500
+        return {"ok": True}

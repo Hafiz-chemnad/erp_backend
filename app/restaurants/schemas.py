@@ -37,6 +37,7 @@ class RestaurantIn(BaseModel):
     googleSheetId: Optional[str] = None
     welcomeVideoUrl: Optional[str] = None
     welcomeVideoMediaId: Optional[str] = None
+    tables: Optional[list[str]] = None  # dine-in table names, e.g. ["T1","T2"] — used by Billing screen
 
     # Pass-through only — the bot conversation engine (still living in the
     # Node backend, not yet migrated) reads this to drive the WhatsApp
@@ -77,6 +78,7 @@ class RestaurantOut(BaseModel):
     googleSheetId: str = ""
     welcomeVideoUrl: str = ""
     welcomeVideoMediaId: str = ""
+    tables: list[str] = Field(default_factory=list)
     flows: list[dict[str, Any]] = Field(default_factory=list)
     catalogItems: list[Any] = Field(default_factory=list)
     createdAt: Optional[datetime] = None
