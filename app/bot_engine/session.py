@@ -7,7 +7,10 @@ from app.core import redis as redis_core
 async def load(phone_number_id: str, customer_number: str) -> dict:
     session = await redis_core.get_session(phone_number_id, customer_number)
     if not session:
-        session = {"flowName": "default_flow", "stepIndex": 0, "data": {}}
+        # "fresh" = first contact (nothing stored in Redis yet). The engine uses it
+        # to SEND the first step (welcome) instead of treating the customer's
+        # first message as an answer to a question they haven't been asked.
+        session = {"flowName": "default_flow", "stepIndex": 0, "data": {}, "fresh": True}
     return session
 
 

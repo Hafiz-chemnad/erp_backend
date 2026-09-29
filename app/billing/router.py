@@ -5,6 +5,7 @@ from app.billing.schemas import (
     CloseTableIn, SettlePaymentIn, MergeTablesIn, MoveTableIn, OpenPhoneOrderOut, EditItemsIn,
 )
 from app.billing import service
+from app.core.phone import normalize_phone
 
 router = APIRouter(prefix="/api/{restaurant_id}/pos", tags=["Billing"])
 
@@ -14,8 +15,9 @@ async def send_to_kitchen(restaurant_id: str, body: POSOrderIn):
     db = get_database()
     if not body.items:
         raise HTTPException(400, "Bill must have at least one item")
-    if body.orderMode in ("phone_pickup", "phone_delivery") and not body.customerNumber:
-        raise HTTPException(400, "Customer phone number is required for phone orders")
+    if body.orderMode in ("phone_pickup", "phone_delivery"):
+        if len(normalize_phone(body.customerNumber)) < 11:
+            raise HTTPException(400, "Enter a valid customer phone number (10 digits, or with country code)")
     order = await service.send_to_kitchen(db, restaurant_id, body)
     return order
 

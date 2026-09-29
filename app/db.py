@@ -53,6 +53,7 @@ async def ensure_indexes():
     # ── Orders (matches tymdb.orders) ────────────────────────────────────
     await db.orders.create_index([("orderId", 1)], unique=True)
     await db.orders.create_index([("restaurantId", 1), ("createdAt", -1)])
+    await db.orders.create_index([("restaurantId", 1), ("updatedAt", -1)])
     await db.orders.create_index([("restaurantId", 1), ("paymentStatus", 1)])
     await db.orders.create_index([("customerNumber", 1)])
     # Billing: fast lookup of a table's/counter-ticket's currently open bill

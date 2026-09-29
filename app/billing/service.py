@@ -2,6 +2,7 @@ import random
 from datetime import datetime, timezone
 from bson import ObjectId
 from app.billing.schemas import POSOrderIn, BillLineOut
+from app.core.phone import normalize_phone
 
 ORDERS_COLLECTION = "orders"
 PENDING_LOCATION_COLLECTION = "pending_location_requests"
@@ -135,6 +136,12 @@ async def send_to_kitchen(db, restaurant_id: str, body: POSOrderIn) -> dict:
     resolved_items = await _resolve_items(db, restaurant_id, body.items)
     now = datetime.now(timezone.utc)
 
+    # Staff type numbers in every format ("98765 43210", "+91-98765..."). Store
+    # the WhatsApp form (country code + digits, no "+") so that (a) order
+    # notifications can actually be delivered and (b) the customer's location
+    # pin — which Meta reports as msg["from"] — matches this order.
+    customer_number = normalize_phone(body.customerNumber) or None
+
     # Dine-in bills with a table number accumulate onto one running order
     # until the table is closed — lets staff add a second round without
     # creating a duplicate bill. Takeaway counter tickets and phone orders
@@ -178,7 +185,7 @@ async def send_to_kitchen(db, restaurant_id: str, body: POSOrderIn) -> dict:
         "orderType": "DELIVERY" if body.orderMode == "phone_delivery" else "TAKEAWAY",
         "tableNumber": body.tableNumber,
         "customerName": body.customerName,
-        "customerNumber": body.customerNumber,
+        "customerNumber": customer_number,
         "items": [i.model_dump() for i in resolved_items],
         "subtotal": subtotal,
         "discountAmount": discount_amount,
@@ -192,16 +199,17 @@ async def send_to_kitchen(db, restaurant_id: str, body: POSOrderIn) -> dict:
         "restaurantId": ObjectId(restaurant_id),
         "restaurantName": restaurant_name,
         "createdAt": now,
+        "updatedAt": now,
     }
     result = await db[ORDERS_COLLECTION].insert_one(order_doc)
     order_doc["_id"] = result.inserted_id
 
-    if body.orderMode == "phone_delivery" and body.customerNumber:
+    if body.orderMode == "phone_delivery" and customer_number:
         await db[PENDING_LOCATION_COLLECTION].update_one(
-            {"restaurantId": ObjectId(restaurant_id), "customerNumber": body.customerNumber},
+            {"restaurantId": ObjectId(restaurant_id), "customerNumber": customer_number},
             {"$set": {
                 "restaurantId": ObjectId(restaurant_id),
-                "customerNumber": body.customerNumber,
+                "customerNumber": customer_number,
                 "orderId": order_doc["orderId"],
                 "requestedAt": now,
             }},
@@ -443,7 +451,10 @@ async def attach_location_and_confirm(db, restaurant_id: str, order_id: str, lat
         {"_id": existing["_id"]},
         {"$set": {
             "paymentStatus": "pending",
-            "location": {"latitude": latitude, "longitude": longitude, "address": address},
+            # lat/lng — the same keys the bot flow saves and the Flutter app
+            # reads. (This used to be latitude/longitude, so the app never saw
+            # the pin and the Map / Assign buttons stayed disabled.)
+            "location": {"lat": latitude, "lng": longitude, "address": address},
             "updatedAt": datetime.now(timezone.utc),
         }},
     )

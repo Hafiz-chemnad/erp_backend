@@ -54,17 +54,33 @@ def handle_location(incoming: dict, session: dict) -> bool:
     return False
 
 
-def handle_order_summary(incoming: dict, session: dict) -> str:
-    """Returns 'continue' | 'cancel' | 'add_more' | None (invalid)."""
-    if incoming.get("type") == "interactive":
-        reply = incoming["interactive"].get("button_reply", {})
-        title = reply.get("title", "")
-        if title == "Confirm Order":
-            return "continue"
-        if title == "Cancel Order":
-            return "cancel"
-        if title == "Add More Items":
-            return "add_more"
+_SUMMARY_ALIASES = {
+    "continue": {"continue", "confirm order", "confirm", "proceed", "place order"},
+    "add_more": {"add more", "add more items", "add items"},
+    "cancel": {"cancel", "cancel order"},
+}
+
+
+def handle_order_summary(incoming: dict, session: dict, options: list[str] | None = None) -> str | None:
+    """Returns 'continue' | 'cancel' | 'add_more' | None (invalid).
+
+    Matches on the button's label (case-insensitive, several common wordings),
+    then falls back to POSITION in the step's options — 1st = continue,
+    2nd = add more, 3rd = cancel — so an owner renaming the buttons in the
+    Flow Editor doesn't silently break ordering. (The default flow ships
+    "Continue / Add More / Cancel", which the old exact-title check rejected.)
+    """
+    if incoming.get("type") != "interactive":
+        return None
+    reply = incoming["interactive"].get("button_reply", {})
+    title = (reply.get("title") or "").strip().lower()
+    reply_id = reply.get("id") or ""
+    for decision, names in _SUMMARY_ALIASES.items():
+        if title in names:
+            return decision
+    if options and reply_id in options:
+        idx = options.index(reply_id)
+        return ["continue", "add_more", "cancel"][idx] if idx < 3 else None
     return None
 
 
@@ -73,7 +89,7 @@ def handle_payment_mode(incoming: dict, session: dict) -> bool:
     return True
 
 
-def handle_custom(incoming: dict, session: dict, step_key: str, required: bool = True) -> bool:
+def handle_custom(incoming: dict, session: dict, step_key: str, required: bool = True, question: str = "") -> bool:
     """Generic handler for owner-added Custom Questions (bot_flow builder).
     Accepts any reply type — text, a button title, or a list selection —
     and stores it verbatim under customResponses, keyed by the step's
@@ -93,7 +109,10 @@ def handle_custom(incoming: dict, session: dict, step_key: str, required: bool =
             answer = interactive["list_reply"].get("title")
 
     if answer:
-        session["data"].setdefault("customResponses", {})[step_key] = answer
+        # Keep the question text next to the answer: the dashboard must show
+        # "Need it spicy? → Yes", not an opaque stepKey → "Yes". Snapshotting
+        # the question also survives the owner rewording it later.
+        session["data"].setdefault("customResponses", {})[step_key] = {"question": question, "answer": answer}
         return True
 
     # No usable reply. Optional questions still let the customer through

@@ -23,7 +23,7 @@ async def list_orders(restaurant_id: str, status: str | None, page: int, limit: 
     total = await db.orders.count_documents(query)
     cursor = (
         db.orders.find(query)
-        .sort("createdAt", -1)
+        .sort([("updatedAt", -1), ("createdAt", -1)])
         .skip((page - 1) * limit)
         .limit(limit)
     )
@@ -87,7 +87,9 @@ async def update_order_status(order_id: str, payment_status: str, notes: str | N
 async def create_order(order_doc: dict):
     """Called by bot_engine when a WhatsApp conversation completes."""
     db = get_database()
-    order_doc["createdAt"] = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    order_doc["createdAt"] = now
+    order_doc["updatedAt"] = now
     result = await db.orders.insert_one(order_doc)
     order_doc["_id"] = result.inserted_id
     return _serialize(order_doc)

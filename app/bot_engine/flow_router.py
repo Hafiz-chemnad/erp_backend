@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from bson import ObjectId
 from app.db import get_database
-from app.bot_engine.flow_schema import Flow, get_flow, get_default_flow
+from app.bot_engine.flow_schema import Flow, get_flow, get_default_flow, validate_flow_order
 
 router = APIRouter(prefix="/api/{restaurant_id}/bot-flow", tags=["Bot Flow"])
 
@@ -23,6 +23,10 @@ async def save_flow(restaurant_id: str, body: Flow):
     """Upserts this named flow into restaurant.flows — same field the bot
     engine already reads via get_flow(), so saving here takes effect on
     the very next WhatsApp message, no redeploy needed."""
+    errors = validate_flow_order(body.steps)
+    if errors:
+        raise HTTPException(400, " ".join(errors))
+
     db = get_database()
     restaurant = await db.restaurants.find_one({"_id": ObjectId(restaurant_id)})
     if not restaurant:

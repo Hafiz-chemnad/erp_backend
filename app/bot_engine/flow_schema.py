@@ -47,3 +47,33 @@ def get_flow(restaurant: dict, flow_name: str = "default_flow") -> Flow:
     # the default rather than breaking the bot for anyone who hasn't
     # opened the Flow Builder.
     return get_default_flow(flow_name)
+
+
+
+# ── Step-order rules ────────────────────────────────────────────────────
+# Owners may reorder steps (this replaces the old LOCATION_FIRST /
+# LOCATION_LAST presets), but a few dependencies are real:
+#   welcome       -> must open the conversation
+#   category      -> must come before items (items lists the chosen category)
+#   items         -> must come before the cart summary
+#   status        -> must close the conversation (it is the confirmation)
+# Everything else (order type, location, payment, custom questions) is free
+# to move — that is what makes "location first", "location last", or
+# "ask about spice level before the menu" possible without presets.
+def validate_flow_order(steps: list) -> list[str]:
+    types = [s.stepType for s in steps]
+    first: dict[str, int] = {}
+    for i, t in enumerate(types):
+        first.setdefault(t, i)
+    errors: list[str] = []
+    if "welcome" in first and first["welcome"] != 0:
+        errors.append("Welcome must stay the first step.")
+    if "status" in first and first["status"] != len(types) - 1:
+        errors.append("Confirmation must stay the last step.")
+    if "category" in first and "items" in first and first["category"] > first["items"]:
+        errors.append("Category Selection must come before Item Selection.")
+    if "items" in first and "order_summary" in first and first["items"] > first["order_summary"]:
+        errors.append("Item Selection must come before the Cart Summary.")
+    if "category" in first and "order_summary" in first and first["category"] > first["order_summary"]:
+        errors.append("Category Selection must come before the Cart Summary.")
+    return errors

@@ -13,8 +13,10 @@ from app.bot_engine.engine import handle_message
 from app.bot_engine.meta_sender import send_text
 from app.billing import service as billing_service
 from app.restaurant_messages import service as rm_service
+import logging
 from datetime import datetime, timezone
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -116,7 +118,7 @@ async def receive_webhook(request: Request):
                     except Exception:
                         # a failure here shouldn't break the rest of the webhook —
                         # fall through to normal bot handling below
-                        pass
+                        logger.exception("phone-order location handling failed for %s", customer_number)
 
                 # hand off to the bot engine — a single failed send inside
                 # the bot flow shouldn't 500 the whole webhook (Meta would
@@ -124,7 +126,7 @@ async def receive_webhook(request: Request):
                 try:
                     await handle_message(restaurant, msg, customer_number)
                 except Exception:
-                    pass
+                    logger.exception("bot_engine failed for customer %s", customer_number)
 
         return {"ok": True}
 
