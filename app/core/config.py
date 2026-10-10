@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     # ── Google Sheets (catalog sync) ──────────────────────────────────────
     GOOGLE_SERVICE_ACCOUNT_JSON: str = ""  # JSON string of service account creds
 
+    # ── Insights (Group C) — free-tier LLM for "Ask Your Data" + upsell copy ──
+    # Groq tried first (fast, free tier), Gemini Flash as fallback. Both optional:
+    # if neither is set, Insights still works for the rule-based upsell/churn
+    # detection, just without the LLM-written suggestion text / Q&A answers.
+    GROQ_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+
     class Config:
         env_file = ".env"
 
