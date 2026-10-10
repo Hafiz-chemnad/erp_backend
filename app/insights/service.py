@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
+from bson import ObjectId
 import uuid
 
 from app.insights.llm_client import ask_llm
@@ -15,9 +16,10 @@ def _since(days: int) -> datetime:
 
 
 async def get_analytics_snapshot(db, restaurant_id: str, period_days: int = 30) -> dict:
+    rid = ObjectId(restaurant_id)
     cutoff = _since(period_days)
     cursor = db.orders.find({
-        "restaurantId": restaurant_id,
+        "restaurantId": rid,
         "createdAt": {"$gte": cutoff},
         "paymentStatus": {"$nin": list(_EXCLUDE_STATUSES)},
     })
@@ -59,7 +61,7 @@ async def get_analytics_snapshot(db, restaurant_id: str, period_days: int = 30) 
     repeat_customers = 0
     for customer in customer_order_count:
         earlier = await db.orders.count_documents({
-            "restaurantId": restaurant_id,
+            "restaurantId": rid,
             "customerNumber": customer,
             "createdAt": {"$lt": cutoff},
             "paymentStatus": {"$nin": list(_EXCLUDE_STATUSES)},
@@ -83,12 +85,13 @@ async def get_analytics_snapshot(db, restaurant_id: str, period_days: int = 30) 
 
 async def get_churn_candidates(db, restaurant_id: str, inactive_days: int = 14, lookback_days: int = 120) -> list[dict]:
     """Customers who ordered before but have gone quiet for `inactive_days`+."""
+    rid = ObjectId(restaurant_id)
     lookback_cutoff = _since(lookback_days)
     inactivity_cutoff = _since(inactive_days)
 
     pipeline = [
         {"$match": {
-            "restaurantId": restaurant_id,
+            "restaurantId": rid,
             "customerNumber": {"$ne": None},
             "createdAt": {"$gte": lookback_cutoff},
             "paymentStatus": {"$nin": list(_EXCLUDE_STATUSES)},
@@ -136,7 +139,7 @@ async def get_upsell_suggestions(db, restaurant_id: str) -> list[dict]:
     churners = await get_churn_candidates(db, restaurant_id, inactive_days=14, lookback_days=120)
     if churners:
         numbers = [c["customerNumber"] for c in churners[:20]]
-        restaurant = await db.restaurants.find_one({"_id": restaurant_id}) or await db.restaurants.find_one({"restaurantId": restaurant_id})
+        restaurant = await db.restaurants.find_one({"_id": ObjectId(restaurant_id)})
         rname = (restaurant or {}).get("name", "us")
         used_llm = False
         message = f"Hi! We miss you at {rname} 🍽️ It's been a while since your last order — come back and enjoy 10% off your next order with code WELCOME10!"
@@ -164,7 +167,7 @@ async def get_upsell_suggestions(db, restaurant_id: str) -> list[dict]:
         top_item = snapshot["topItems"][0]
         # customers who ordered in the last 30 days but NOT this top item — good cross-sell target
         recent_customers_cursor = db.orders.find({
-            "restaurantId": restaurant_id,
+            "restaurantId": ObjectId(restaurant_id),
             "createdAt": {"$gte": _since(30)},
             "customerNumber": {"$ne": None},
             "paymentStatus": {"$nin": list(_EXCLUDE_STATUSES)},

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from bson import ObjectId
 from app.db import get_database
 from app.insights.schemas import (
     AskQuestionIn, AskQuestionOut,
@@ -43,7 +44,7 @@ async def send_winback(restaurant_id: str, body: SendWinbackIn):
     if not body.customerNumbers:
         raise HTTPException(400, "No customers selected")
 
-    restaurant = await db.restaurants.find_one({"_id": restaurant_id}) or await db.restaurants.find_one({"restaurantId": restaurant_id})
+    restaurant = await db.restaurants.find_one({"_id": ObjectId(restaurant_id)})
     if not restaurant or not restaurant.get("waToken") or not restaurant.get("phoneNumberId"):
         raise HTTPException(400, "Restaurant's WhatsApp credentials aren't configured")
 
