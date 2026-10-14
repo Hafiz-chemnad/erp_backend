@@ -30,6 +30,18 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GEMINI_API_KEY: str = ""
 
+    # ── AI Agent bridge (Group D) — points at the separately-deployed
+    # agent-backend service. INTERNAL_API_KEY is optional for now (auth on
+    # agent-backend's side is deferred) — when it's turned on there, set the
+    # same value here and it'll be sent as X-Internal-Key automatically.
+    AGENT_BACKEND_URL: str = ""
+    AGENT_BACKEND_INTERNAL_KEY: str = ""
+    # Public base URL of THIS erp_backend deployment — needed so the Tools we
+    # register on agent-backend have a real URL to call back into (e.g. the
+    # place-order endpoint). Set this to your Render URL, e.g.
+    # https://your-erp-backend.onrender.com
+    ERP_BACKEND_PUBLIC_URL: str = ""
+
     class Config:
         env_file = ".env"
 

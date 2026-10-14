@@ -13,6 +13,8 @@ from app.bot_engine.engine import handle_message
 from app.bot_engine.meta_sender import send_text
 from app.billing import service as billing_service
 from app.restaurant_messages import service as rm_service
+from app.ai_agent import service as ai_agent_service
+from app.ai_agent.service import AgentBackendError
 import logging
 from datetime import datetime, timezone
 
@@ -119,6 +121,64 @@ async def receive_webhook(request: Request):
                         # a failure here shouldn't break the rest of the webhook —
                         # fall through to normal bot handling below
                         logger.exception("phone-order location handling failed for %s", customer_number)
+
+                # ── AI agent mode (Group D) ─────────────────────────────
+                # Restaurants with AI mode on get routed here instead of the
+                # scripted bot — text, voice notes, and the customer's shared
+                # location pin (asked for BEFORE the AI places a DELIVERY
+                # order — see assemble_system_prompt) all land here.
+                # Everything else in this webhook, and every restaurant that
+                # hasn't turned AI mode on, is completely untouched.
+                if message_type in ("text", "audio", "location") and restaurant.get("aiAgentEnabled"):
+                    rid = str(restaurant["_id"])
+                    wa_token = restaurant.get("waToken")
+                    try:
+                        if message_type == "audio":
+                            # Voice note — transcribe first, then feed the
+                            # transcript into the exact same chat path as
+                            # typed text. No separate voice pipeline needed.
+                            media_id = msg.get("audio", {}).get("id")
+                            text_body = await ai_agent_service.transcribe_voice_note(media_id, wa_token)
+                            if not text_body:
+                                await send_text(
+                                    phone_number_id, customer_number,
+                                    "Sorry, I couldn't understand that voice note — could you type your order instead?",
+                                    wa_token,
+                                )
+                                continue
+                        elif message_type == "location":
+                            # The AI already asked for this pin before trying
+                            # to place a DELIVERY order (see system prompt) —
+                            # turn it into a plain-text turn so the model can
+                            # read the coordinates and call place_order next.
+                            loc = msg.get("location", {})
+                            lat = loc.get("latitude")
+                            lng = loc.get("longitude")
+                            if lat is None or lng is None:
+                                continue  # malformed location payload, ignore
+                            address = loc.get("address") or loc.get("name") or "not provided"
+                            text_body = (
+                                f"[Delivery location received] latitude={lat}, longitude={lng}, "
+                                f"address={address}. Please proceed to place the order using this location."
+                            )
+                        else:
+                            text_body = msg.get("text", {}).get("body", "")
+
+                        session_state = await ai_agent_service.get_session_state(db, rid, customer_number)
+                        result = await ai_agent_service.send_chat_turn(db, rid, text_body, session_state)
+                        await ai_agent_service.save_session_state(db, rid, customer_number, result["sessionState"])
+                        if result.get("response"):
+                            await send_text(phone_number_id, customer_number, result["response"], wa_token)
+                    except AgentBackendError:
+                        logger.exception("ai_agent chat failed for customer %s", customer_number)
+                        await send_text(
+                            phone_number_id, customer_number,
+                            "Sorry, I'm having trouble right now — a staff member will follow up with you shortly.",
+                            wa_token,
+                        )
+                    except Exception:
+                        logger.exception("ai_agent chat failed for customer %s", customer_number)
+                    continue  # don't also hand this message to the scripted bot engine
 
                 # hand off to the bot engine — a single failed send inside
                 # the bot flow shouldn't 500 the whole webhook (Meta would

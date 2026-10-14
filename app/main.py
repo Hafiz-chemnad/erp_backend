@@ -24,6 +24,7 @@ from app.catalog.router import router as catalog_router
 from app.billing.router import router as billing_router
 from app.bot_engine.flow_router import router as bot_flow_router
 from app.insights.router import router as insights_router
+from app.ai_agent.router import router as ai_agent_router
 
 app = FastAPI(title="WhatsApp ERP - CRM Backend")
 
@@ -66,3 +67,4 @@ app.include_router(catalog_router)
 app.include_router(billing_router)
 app.include_router(bot_flow_router)
 app.include_router(insights_router)
+app.include_router(ai_agent_router)

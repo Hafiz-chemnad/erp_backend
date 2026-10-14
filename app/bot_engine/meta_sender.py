@@ -52,3 +52,32 @@ async def send_list(phone_number_id: str, to: str, header: str, body: str, items
             "action": {"button": "View Menu", "sections": [{"title": "Menu", "rows": rows}]},
         },
     })
+
+
+async def download_whatsapp_media(media_id: str, wa_token: str) -> tuple[bytes, str] | None:
+    """Downloads a WhatsApp media attachment (e.g. a voice note) given its
+    media id. Two-step Graph API flow: first resolve the media id to a
+    short-lived CDN URL, then fetch the bytes from that URL — both requests
+    need the same bearer token. Returns (bytes, mime_type), or None on any
+    failure (caller should fall back gracefully, never crash the webhook)."""
+    headers = {"Authorization": f"Bearer {wa_token}"}
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            meta_resp = await client.get(f"{settings.META_GRAPH_URL}/{media_id}", headers=headers)
+            if meta_resp.status_code >= 400:
+                print("META MEDIA LOOKUP ERROR:", meta_resp.status_code, meta_resp.text)
+                return None
+            media_info = meta_resp.json()
+            media_url = media_info.get("url")
+            mime_type = media_info.get("mime_type", "audio/ogg")
+            if not media_url:
+                return None
+
+            file_resp = await client.get(media_url, headers=headers)
+            if file_resp.status_code >= 400:
+                print("META MEDIA DOWNLOAD ERROR:", file_resp.status_code)
+                return None
+            return file_resp.content, mime_type
+    except Exception as e:
+        print("META MEDIA DOWNLOAD EXCEPTION:", e)
+        return None
