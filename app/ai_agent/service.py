@@ -11,7 +11,11 @@ from app.ai_agent.schemas import PlaceOrderIn, PromptConfigIn
 from app.ai_agent.stt_client import transcribe_audio
 from app.bot_engine.meta_sender import download_whatsapp_media
 
-_TIMEOUT = httpx.Timeout(20.0)
+# Generous on purpose: if agent-backend is a Render free/low-tier instance
+# that's gone to sleep, just waking up can take 30-60s before it even starts
+# on the actual request — a short timeout here would make a perfectly fine
+# first call look like a hard failure.
+_TIMEOUT = httpx.Timeout(60.0)
 
 
 def _agent_headers() -> dict:
@@ -102,7 +106,11 @@ async def provision_business(db, restaurant_id: str) -> str:
         "name": restaurant.get("name", "Restaurant"),
         "tone": "friendly",
         "knowledge_mode": "vectorless",
-        "business_type": "restaurant",
+        # agent-backend's Business model only accepts one of
+        # delivery | appointment | general — "restaurant" isn't a valid
+        # value there (that's erp_backend's own domain, not agent-backend's).
+        # WhatsApp ordering is a delivery/pickup flow, so "delivery" fits.
+        "business_type": "delivery",
     })
     business_id = result["id"]
 
