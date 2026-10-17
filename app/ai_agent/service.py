@@ -191,6 +191,19 @@ async def register_default_tools(restaurant_id: str, business_id: str) -> None:
         await _agent_request("POST", f"/businesses/{business_id}/tools/", json=tool)
 
 
+async def resync_default_tools(restaurant_id: str, business_id: str) -> None:
+    """Tools are stored in agent-backend when a business is first provisioned
+    and were never refreshed afterwards, so businesses created before a tool
+    change kept an out-of-date place_order (e.g. without latitude/longitude).
+    Called on every Save of the setup screen: drop our two tools and register
+    the current definitions."""
+    existing = await _agent_request("GET", f"/businesses/{business_id}/tools/")
+    for tool in existing if isinstance(existing, list) else []:
+        if tool.get("tool_name") in ("get_menu", "place_order") and tool.get("id"):
+            await _agent_request("DELETE", f"/businesses/{business_id}/tools/{tool['id']}")
+    await register_default_tools(restaurant_id, business_id)
+
+
 async def enable_ai_agent(db, restaurant_id: str) -> str:
     business_id = await provision_business(db, restaurant_id)
     await db.restaurants.update_one(
@@ -230,6 +243,8 @@ async def save_prompt_config(db, restaurant_id: str, config: PromptConfigIn) -> 
     if not business_id:
         business_id = await provision_business(db, restaurant_id)
 
+    await resync_default_tools(restaurant_id, business_id)
+
     prompt_text = assemble_system_prompt(restaurant.get("name", "the restaurant"), config)
 
     await _agent_request("PUT", f"/businesses/{business_id}/prompt", json={
@@ -260,6 +275,14 @@ async def place_ai_order(db, restaurant_id: str, body: PlaceOrderIn) -> dict:
             "retailer_id": line.retailerId,
         })
         if not menu_item:
+            # the model sometimes passes the item's name instead of its
+            # retailerId — fall back to an exact (case-insensitive) name match
+            import re as _re
+            menu_item = await db.menu_items.find_one({
+                "restaurant_id": restaurant_id,
+                "name": {"$regex": f"^{_re.escape(line.retailerId.strip())}$", "$options": "i"},
+            })
+        if not menu_item:
             raise ValueError(f"Menu item '{line.retailerId}' not found")
         if not menu_item.get("is_available", True):
             raise ValueError(f"'{menu_item.get('name')}' is currently unavailable")
@@ -267,7 +290,7 @@ async def place_ai_order(db, restaurant_id: str, body: PlaceOrderIn) -> dict:
             "name": menu_item["name"],
             "qty": line.qty,
             "price": menu_item["price"],
-            "retailer_id": line.retailerId,
+            "retailer_id": menu_item.get("retailer_id", line.retailerId),
         })
 
     if not cart:
