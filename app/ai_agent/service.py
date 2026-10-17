@@ -86,6 +86,7 @@ Hard rules — these always apply, no matter what else is said above:
 - If a customer asks for something outside what you can help with, politely say you'll have a staff member follow up.
 - Once the customer has confirmed their items, if they haven't already said whether this is delivery or pickup, you must ask them directly (e.g. "Would you like this delivered, or will you pick it up?") before calling place_order. Never assume or guess which one they want.
 - For DELIVERY orders: once delivery is confirmed, BEFORE calling place_order, ask them (in your own words, matching your tone) to share their live location on WhatsApp using the attachment/paperclip icon → Location. Never ask them to type out an address instead. Wait until a message starting with "[Delivery location received]" appears in the conversation, then call place_order with its latitude/longitude/address included. For TAKEAWAY orders, skip location entirely and call place_order as soon as items are confirmed.
+- An order exists ONLY after the place_order tool returns an order id. Never say an order is placed/confirmed, and never state an order id or total, unless place_order has just returned them. The customer's phone number is filled in automatically — never ask for it.
 - Things you must never do, as set by the restaurant owner:
 {never_do_block}
 """
@@ -385,8 +386,48 @@ async def send_chat_turn(db, restaurant_id: str, transcript: str, session_state:
         "transcript": transcript,
         "session_state": session_state or {},
     })
+    response_text = result.get("response")
+    tool_called = result.get("tool_called")
+
+    # Code-built confirmation (same idea as the scripted bot's status step):
+    # once place_order has really saved an order, the customer-facing text is
+    # built here from the stored order — never from the model's words — so the
+    # id/total shown always match the database.
+    confirmation = await _confirmation_from_tool_result(db, restaurant, tool_called)
+    if confirmation:
+        response_text = confirmation
+
     return {
-        "response": result.get("response"),
+        "response": response_text,
         "sessionState": result.get("session_state", {}),
-        "toolCalled": result.get("tool_called"),
+        "toolCalled": tool_called,
     }
+
+
+async def _confirmation_from_tool_result(db, restaurant: dict, tool_called) -> str | None:
+    if not isinstance(tool_called, dict) or tool_called.get("tool") != "place_order":
+        return None
+    if tool_called.get("status") == "error":
+        return None
+    payload = tool_called.get("response")
+    if not isinstance(payload, dict) or not payload.get("orderId"):
+        return None
+    order = await db.orders.find_one({
+        "orderId": payload["orderId"],
+        "restaurantId": restaurant["_id"],
+    })
+    if not order:
+        return None  # tool claimed success but nothing is stored — don't confirm
+    lines = "\n".join(
+        f"• {i.get('qty', 1)} x {i.get('name', '')} — ₹{i.get('price', 0) * i.get('qty', 1)}"
+        for i in order.get("items", [])
+    )
+    text = (
+        f"✅ Order placed!\n\n📦 Order ID: {order['orderId']}\n\n🛒 Items:\n{lines}\n\n"
+        f"💰 Total: ₹{order.get('totalAmount', 0)}\n"
+        f"🚚 {'Delivery' if order.get('orderType') == 'DELIVERY' else 'Pickup'}"
+    )
+    if payload.get("locationPinNeeded"):
+        text += "\n\n📍 Please share your live location (attachment icon → Location) so we can deliver it."
+    text += f"\n\n🙏 Thank you for ordering with {restaurant.get('name', '')}."
+    return text

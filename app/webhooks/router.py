@@ -165,6 +165,9 @@ async def receive_webhook(request: Request):
                             text_body = msg.get("text", {}).get("body", "")
 
                         session_state = await ai_agent_service.get_session_state(db, rid, customer_number)
+                        # the AI can't know who it's talking to — hand it the
+                        # WhatsApp number so place_order never gets a guessed one
+                        session_state = {**(session_state or {}), "customer_number": customer_number}
                         result = await ai_agent_service.send_chat_turn(db, rid, text_body, session_state)
                         await ai_agent_service.save_session_state(db, rid, customer_number, result["sessionState"])
                         if result.get("response"):

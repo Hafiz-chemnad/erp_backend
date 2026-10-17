@@ -41,7 +41,7 @@ class PlaceOrderIn(BaseModel):
     never staff-entered counter/table orders."""
     items: list[PlaceOrderItemIn]
     customerNumber: str
-    orderType: str = "DELIVERY"            # DELIVERY | TAKEAWAY
+    orderType: str                         # DELIVERY | TAKEAWAY — required: the customer must have said which
     # Set only once the customer has shared their WhatsApp location pin —
     # the AI is instructed to collect this BEFORE calling place_order for a
     # DELIVERY order, so a normal order already has its address attached at
