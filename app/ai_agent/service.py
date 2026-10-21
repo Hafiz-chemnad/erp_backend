@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import logging
+import re
 import httpx
 from bson import ObjectId
 
@@ -15,6 +17,8 @@ from app.bot_engine.meta_sender import download_whatsapp_media
 # that's gone to sleep, just waking up can take 30-60s before it even starts
 # on the actual request — a short timeout here would make a perfectly fine
 # first call look like a hard failure.
+logger = logging.getLogger(__name__)
+
 _TIMEOUT = httpx.Timeout(60.0)
 
 
@@ -419,12 +423,44 @@ async def send_chat_turn(db, restaurant_id: str, transcript: str, session_state:
     confirmation = await _confirmation_from_tool_result(db, restaurant, tool_called)
     if confirmation:
         response_text = confirmation
+    elif _claims_order_placed(response_text) and not _place_order_succeeded(tool_called):
+        # Last line of defence, independent of agent-backend: the model said
+        # an order was placed / quoted an order id, but no order was saved.
+        logger.warning("Blocked fabricated order confirmation: %r", (response_text or "")[:200])
+        response_text = (
+            "I haven't placed your order yet. Please confirm your items and whether it's "
+            "delivery or pickup (and share your location pin for delivery), and I'll place it."
+        )
+        history = (result.get("session_state") or {}).get("chat_history")
+        if history and history[-1].get("role") == "assistant":
+            history[-1]["content"] = response_text  # don't let the fake line prime later turns
 
     return {
         "response": response_text,
         "sessionState": result.get("session_state", {}),
         "toolCalled": tool_called,
     }
+
+
+_ORDER_CLAIM_RE = re.compile(
+    r"(order\s*(id|number|no\.?)\s*[:#]?\s*\S*\d{5,})|"
+    r"(order\s+(is|has been|was|got)\s+(now\s+)?(confirmed|placed|received))|"
+    r"((i(\'ve| have)|we(\'ve| have))\s+(placed|confirmed)\s+your\s+order)|"
+    r"(order\s+(confirmed|placed))",
+    re.IGNORECASE,
+)
+
+
+def _claims_order_placed(text) -> bool:
+    return bool(text and _ORDER_CLAIM_RE.search(text))
+
+
+def _place_order_succeeded(tool_called) -> bool:
+    return (
+        isinstance(tool_called, dict)
+        and tool_called.get("tool") == "place_order"
+        and tool_called.get("status") != "error"
+    )
 
 
 async def _confirmation_from_tool_result(db, restaurant: dict, tool_called) -> str | None:
